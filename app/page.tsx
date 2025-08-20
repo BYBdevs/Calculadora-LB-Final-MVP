@@ -469,3 +469,125 @@ const PercentField=({label,value,onChange}:{label:string,value:number,onChange:(
     </div>
   </div>
 );
+
+function Reporte({
+  modo, cliente, rutaNombre, origen, destino, km,
+  dias, credito, peajesUSD, tn, por, // por = presentaciones (sacos)
+  res, cfg, vehNombre
+}: {
+  modo: "interno" | "comercial" | "logisbur";
+  cliente: string; rutaNombre: string; origen: string; destino: string; km: number;
+  dias: number; credito: number; peajesUSD: number; tn: number;
+  por: any[]; res: any; cfg: any; vehNombre: string;
+}) {
+  const fecha = new Date().toLocaleString();
+  const showCostos = (modo !== "comercial");
+  return (
+    <div className="only-print">
+      <div className="report-card p-6 rounded-2xl">
+        {/* Encabezado */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <Image src="/logo.png" alt="logo" width={48} height={48} />
+            <div>
+              <div className="text-xl font-semibold">LogisBur — Cotización de Transporte</div>
+              <div className="text-xs text-slate-500">{fecha}</div>
+            </div>
+          </div>
+          <div className="text-right text-sm text-slate-700">
+            <div><b>Modo:</b> {modo}</div>
+            <div><b>Vehículo:</b> {vehNombre}</div>
+          </div>
+        </div>
+
+        {/* Cliente / Ruta */}
+        <div className="grid md:grid-cols-2 gap-2 text-sm mb-4">
+          <div><b>Cliente:</b> {cliente || "—"}</div>
+          <div><b>Ruta:</b> {rutaNombre || "—"}</div>
+          <div><b>Origen → Destino:</b> {origen || "—"} → {destino || "—"}</div>
+          <div><b>Distancia:</b> {Number(km || 0).toFixed(0)} km</div>
+        </div>
+
+        {/* 1) Parámetros de viaje */}
+        <div className="mb-3">
+          <div className="report-section-title mb-1">1) Parámetros de viaje</div>
+          <div className="report-grid text-sm">
+            <div><b>Días de viaje:</b> {dias}</div>
+            <div><b>Días de crédito:</b> {credito}</div>
+            <div><b>Peajes (input):</b> {money(peajesUSD)}</div>
+            {modo === "logisbur" && (<div><b>Cruce frontera:</b> {res?.cf ? money(res.cf) : "No aplica"}</div>)}
+            <div><b>Costos adicionales:</b> {money((res?.sub || 0) - (res?.fin || 0) - (res?.per || 0) - (res?.peajes || 0) - (res?.dep || 0) - (res?.comb || 0) - (res?.cf || 0))}</div>
+          </div>
+        </div>
+
+        {/* 2) Desglose de costos */}
+        {showCostos && (
+          <div className="mb-3">
+            <div className="report-section-title mb-1">2) Desglose de costos</div>
+            <table className="report-table">
+              <thead>
+                <tr><th>Concepto</th><th>Total (USD)</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Combustible total</td><td>{money(res.comb)}</td></tr>
+                <tr><td>Insumos</td><td>{money(res.ins)}</td></tr>
+                <tr><td>Depreciación</td><td>{money(res.dep)}</td></tr>
+                <tr><td>Peajes</td><td>{money(res.peajes)}</td></tr>
+                <tr><td>Personal (conductor, viáticos, administrativo)</td><td>{money(res.per)}</td></tr>
+                {modo === "logisbur" && res.cf > 0 && (<tr><td>Cruce de frontera</td><td>{money(res.cf)}</td></tr>)}
+                <tr><td>Financiero</td><td>{money(res.fin)}</td></tr>
+                <tr><td><b>Subtotal</b></td><td><b>{money(res.sub)}</b></td></tr>
+                <tr><td><b>Costo aplicado (mínimo)</b></td><td><b>{money(res.base)}</b></td></tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* 3) Costo de la ruta */}
+        {showCostos && (
+          <div className="mb-3">
+            <div className="report-section-title mb-1">3) Costo de la ruta</div>
+            <div className="text-sm"><b>Total costo (aplicado):</b> {money(res.base)}</div>
+            {tn > 0 && <div className="text-sm"><b>Costo por tonelada:</b> {money(res.base / tn)}</div>}
+          </div>
+        )}
+
+        {/* 4) PVP sugerido */}
+        <div className="mb-4">
+          <div className="report-section-title mb-1">{showCostos ? "4) PVP sugerido" : "PVP sugerido"}</div>
+          <div className="text-lg font-semibold">{money(res.pvp)}</div>
+          {/* Presentaciones por saco (solo cuando exista) */}
+          {por?.length > 0 && (
+            <table className="report-table mt-2">
+              <thead><tr><th>Presentación</th><th>Cantidad</th><th>PVP por saco</th></tr></thead>
+              <tbody>
+                {por.map((r:any, i:number) => (
+                  <tr key={i}><td>{r.w} kg</td><td>{r.q}</td><td>{money(r.v)}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {/* Por tonelada (Logisbur) */}
+          {modo === "logisbur" && tn > 0 && (
+            <div className="text-sm mt-2"><b>PVP por tonelada:</b> {money(res.pvp / tn)}</div>
+          )}
+        </div>
+
+        {/* Firmas */}
+        <div className="grid grid-cols-2 gap-8 mt-10">
+          <div className="text-center">
+            <div style={{height: 60}} />
+            <div className="border-t border-slate-300 w-full"></div>
+            <div className="text-xs text-slate-600 mt-1">Elaborado por</div>
+          </div>
+          <div className="text-center">
+            <div style={{height: 60}} />
+            <div className="border-t border-slate-300 w-full"></div>
+            <div className="text-xs text-slate-600 mt-1">Aprobado por</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
