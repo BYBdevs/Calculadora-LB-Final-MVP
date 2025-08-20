@@ -8,3 +8,15 @@ body { @apply bg-slate-50; }
   .card { box-shadow:none !important; border:1px solid #e5e7eb; }
   body { background:white; }
 }
+
+/* Mostrar solo el reporte al imprimir */
+.only-print { display: none; }
+@media print {
+  .only-print { display: block !important; }
+  .no-print { display: none !important; }
+  .report-card { box-shadow: none !important; border: 1px solid #e5e7eb; }
+  .report-section-title { font-weight: 600; color: #0f172a; }
+  .report-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem 1rem; }
+  .report-table { width: 100%; border: 1px solid #e5e7eb; border-collapse: collapse; }
+  .report-table th, .report-table td { border: 1px solid #e5e7eb; padding: .5rem .6rem; font-size: 12px; }
+}
