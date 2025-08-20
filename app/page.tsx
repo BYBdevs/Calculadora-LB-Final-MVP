@@ -56,6 +56,10 @@ export default function Page(){
   const [origen,setOrigen]=useState("—"); 
   const [destino,setDestino]=useState("—");
 
+  // NUEVO estado para reporte
+  const [cliente, setCliente] = useState("");
+  const [rutaNombre, setRutaNombre] = useState("");
+
   const [veh,setVeh]=useState("3e"); 
   const [km,setKm]=useState(200); 
   const [dias,setDias]=useState(1); 
@@ -159,6 +163,11 @@ export default function Page(){
               <Text label="Origen" v={origen} set={setOrigen}/>
               <Text label="Destino" v={destino} set={setDestino}/>
             </div>
+          <div className="grid grid-cols-2 gap-2 mt-2">
+              <Text label="Cliente (opcional)" v={cliente} set={setCliente}/>
+              <Text label="Nombre de ruta (opcional)" v={rutaNombre} set={setRutaNombre}/>
+            </div>
+
 
             {modo!=="logisbur"?(
               <>
@@ -351,10 +360,20 @@ const Kpi=({label,v,hi}:{label:string,v:number,hi?:boolean})=>(<div className={`
 function NarrativaLogisbur({origen,destino,km,mixto,kmEC,kmPE,cap,peajesUSD,dEC,dPE,tn,costo,pvp}:{[key:string]:any}){
   const dist=useMemo(()=>{ if(mixto) return {ec:Math.max(0,Number(kmEC)||0), pe:Math.max(0,Number(kmPE)||0)}; const um=(cap||200)*8; return {ec:Math.min(km,um), pe:Math.max(0,km-um)}; },[mixto,kmEC,kmPE,cap,km]);
   const cTon=tn>0?costo/tn:0, vTon=tn>0?pvp/tn:0;
-  return (<div className="mt-3 p-4 ring-1 ring-slate-200 rounded-xl bg-white text-sm text-slate-700">
-    Ruta planificada: <b>Trailer</b> {origen!=="—"||destino!=="—"?<>de <b>{origen}</b> a <b>{destino}</b></>:""} con carga de <b>{(tn||0).toFixed(2)} toneladas</b>. Se recorrerán <b>{Number(km||0).toFixed(0)} km</b>{(dist.ec>0||dist.pe>0)&&<>: <b>{dist.ec.toFixed(0)} km</b> en Ecuador y <b>{dist.pe.toFixed(0)} km</b> en Perú</>}. El viaje contempla <b>{Number(dEC||0).toFixed(0)} día(s)</b> en Ecuador y <b>{Number(dPE||0).toFixed(0)} día(s)</b> en Perú. El valor acumulado de peajes (según el input manual) es de <b>{money(peajesUSD)}</b>. Costo por tonelada: <b>{money(cTon)}</b>; PVP por tonelada: <b>{money(vTon)}</b>.
-  </div>);
-}
+  return (
+  <div className="mt-3 p-4 ring-1 ring-slate-200 rounded-xl bg-white text-sm text-slate-700">
+    Ruta planificada: <b>Trailer</b>
+    {(origen !== "—" || destino !== "—") && <> de <b>{origen}</b> a <b>{destino}</b></>}
+    {rutaNombre && <> — <b>{rutaNombre}</b></>}{" "}
+    para el cliente {cliente ? <b>{cliente}</b> : <i>(no especificado)</i>}.
+    Se recorrerán <b>{Number(km || 0).toFixed(0)} km</b>.
+    El viaje contempla <b>{Number(dEC || 0).toFixed(0)} día(s)</b> en Ecuador y <b>{Number(dPE || 0).toFixed(0)} día(s)</b> en Perú.
+    El valor acumulado de peajes (según el input manual) es de <b>{money(peajesUSD)}</b>.
+    Costo por tonelada: <b>{money(costo / Math.max(tn || 0, 1))}</b>;
+    PVP por tonelada: <b>{money(pvp / Math.max(tn || 0, 1))}</b>.
+  </div>
+);
+
 
 /* Peaje Modal */
 function PeajeModal({onClose,onPick}:{onClose:()=>void,onPick:(c:number,t:number)=>void}){
