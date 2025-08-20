@@ -482,6 +482,22 @@ function Reporte({
 }) {
   const fecha = new Date().toLocaleString();
   const showCostos = (modo !== "comercial");
+  <Reporte
+  modo={modo}
+  cliente={cliente}
+  rutaNombre={rutaNombre}
+  origen={origen}
+  destino={destino}
+  km={km}
+  dias={dias}
+  credito={credito}
+  peajesUSD={peajes}
+  tn={modo==="logisbur" ? tn : ( (s25*25+s30*30+s45*45+s50*50)/1000 )}
+  por={res?.por || []}
+  res={res}
+  cfg={cfg}
+  vehNombre={V?.nombre || "—"}
+/>
   return (
     <div className="only-print">
       <div className="report-card p-6 rounded-2xl">
