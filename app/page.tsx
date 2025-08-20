@@ -1,4 +1,3 @@
-
 "use client";
 import React, {useMemo,useState,useEffect} from "react";
 import Image from "next/image";
@@ -242,9 +241,23 @@ export default function Page(){
                 {(modo!=="comercial")?(
                   <>
                     <h3 className="font-medium text-slate-700 mb-2">Desglose {modo==="logisbur"?"Logisbur":"Interno"}</h3>
-                    <MiniGrid items={[
-                      ["Combustible total",res.comb],["Insumos",res.ins],["Depreciación",res.dep],["Peajes",res.peajes],["Personal",res.per],...(modo==="logisbur"&&cruceOn?[["Cruce frontera",res.cf]]:[]),["Financiero",res.fin]
-                    ]}/>
+
+                    {/* FIX TS: construir items tipados explícitamente */}
+                    {(() => {
+                      const miniItems: [string, number][] = [
+                        ["Combustible total", res.comb],
+                        ["Insumos", res.ins],
+                        ["Depreciación", res.dep],
+                        ["Peajes", res.peajes],
+                        ["Personal", res.per],
+                      ];
+                      if (modo === "logisbur" && cruceOn) {
+                        miniItems.push(["Cruce frontera", res.cf]);
+                      }
+                      miniItems.push(["Financiero", res.fin]);
+                      return <MiniGrid items={miniItems} />;
+                    })()}
+
                     {modo==="logisbur"&&(
                       <table className="w-full text-sm mt-3 border border-slate-200 rounded-lg overflow-hidden">
                         <thead className="bg-slate-50"><tr><Th>Concepto</Th><Th>Precio/gal</Th><Th>Total</Th></tr></thead>
