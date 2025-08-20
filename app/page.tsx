@@ -140,7 +140,7 @@ export default function Page(){
             <div className="flex items-center gap-4">
               {modo!=="comercial" && <div className="text-sm text-slate-700">Costo: <b>{money(res?.base||0)}</b></div>}
               <div className="text-sm text-emerald-700">PVP: <b>{money(res?.pvp||0)}</b></div>
-              <button className="px-3 py-1.5 rounded-lg bg-slate-900 text-white" onClick={printPDF}>Exportar PDF</button>
+              <button className="px-3 py-1.5 rounded-lg bg-slate-900 text-white" onClick={generarReporte}> Generar Reporte </button>
             </div>
           </div>
         </div>
