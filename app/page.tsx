@@ -2,6 +2,7 @@
 import React, {useMemo,useState,useEffect} from "react";
 import Image from "next/image";
 import dynamic from "next/dynamic";
+import { kMaxLength } from "buffer";
 
 // Carga dinámica del mapa (sin SSR)
 const RoutePlanner = dynamic(() => import("./components/RoutePlanner"), { ssr: false });
@@ -121,7 +122,7 @@ export default function Page(){
 
   // Logisbur
   const [tn,setTn]=useState(0),[dPeru,setDPeru]=useState(0),[mixto,setMixto]=useState(false),[kmEC,setKmEC]=useState(0),[kmPE,setKmPE]=useState(0);
-  const [cruceOn,setCruceOn]=useState(true);
+  const [cruceOn,setCruceOn]=useState(false);
 
   const kgForm=useMemo(()=>s25*25+s30*30+s45*45+s50*50,[s25,s30,s45,s50]);
   const tnForm=kgForm/1000;
@@ -309,8 +310,11 @@ export default function Page(){
                             if (destination) setDestino(destination);
                             if (routeName) setRutaNombre(routeName);
                           }}
-                          onCountryKm={({ kmEC, kmPE}) => {
-                            setMixto(true);
+                          onBorderCrossing={(crossed) => {
+                            if (crossed) setCruceOn(true); else setCruceOn(false);
+                          }}
+                          onCountryKm={({ RL, kmEC, kmPE}) => {
+                            setMixto(RL);
                             setKmEC(kmEC);
                             setKmPE(kmPE);
                           }}

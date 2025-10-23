@@ -19,7 +19,8 @@ type Props = {
     routeName?: string;
   }) => void;
   showTollsEditor?: boolean;
-  onCountryKm?: (data: { kmEC: number; kmPE: number }) => void;
+  onBorderCrossing?: (crossed: boolean) => void;
+  onCountryKm?: (data: { RL: boolean; kmEC: number; kmPE: number}) => void;
 };
 
 const DEFAULT_TOLLS: Toll[] = [
@@ -77,6 +78,8 @@ export default function RoutePlanner(props: Props) {
   const showEditor = props.showTollsEditor ?? false;
   const leftPanelRef = useRef<HTMLDivElement | null>(null);
   const summaryRef = useRef<HTMLDivElement | null>(null);
+  const HUAQUILLAS = { lat: -3.4819, lng: -80.2141 };
+  const HUAQUILLAS_RADIUS_M = 2000; // 4 km aprox, ajusta si necesitas
 
 
   const [ready, setReady] = useState(false);
@@ -287,6 +290,45 @@ export default function RoutePlanner(props: Props) {
     return out;
   }
 
+  function distPointToSeg(p: google.maps.LatLng, a: google.maps.LatLng, b: google.maps.LatLng) {
+    const l2 = google.maps.geometry.spherical.computeDistanceBetween(a, b) ** 2;
+    if (l2 === 0) return google.maps.geometry.spherical.computeDistanceBetween(p, a);
+
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const av = { x: toRad(a.lng()), y: toRad(a.lat()) };
+    const bv = { x: toRad(b.lng()), y: toRad(b.lat()) };
+    const pv = { x: toRad(p.lng()), y: toRad(p.lat()) };
+
+    const vx = bv.x - av.x, vy = bv.y - av.y;
+    const wx = pv.x - av.x, wy = pv.y - av.y;
+    let t = (vx * wx + vy * wy) / (vx * vx + vy * vy);
+    t = Math.max(0, Math.min(1, t));
+
+    const proj = new google.maps.LatLng(
+      a.lat() + (b.lat() - a.lat()) * t,
+      a.lng() + (b.lng() - a.lng()) * t
+    );
+    return google.maps.geometry.spherical.computeDistanceBetween(p, proj);
+  }
+
+  function touchesHuaquillas(path: google.maps.LatLng[], radiusMeters = HUAQUILLAS_RADIUS_M) {
+    if (!path || path.length < 2) return false;
+    const P = new google.maps.LatLng(HUAQUILLAS.lat, HUAQUILLAS.lng);
+
+    for (let i = 0; i < path.length - 1; i++) {
+      const a = path[i], b = path[i + 1];
+
+      // filtro barato para no calcular de más
+      const minEnd = Math.min(
+        google.maps.geometry.spherical.computeDistanceBetween(P, a),
+        google.maps.geometry.spherical.computeDistanceBetween(P, b)
+      );
+      if (minEnd > 10000) continue; // ambos extremos a >10km
+
+      if (distancePointToSegment(P, a, b) <= radiusMeters) return true;
+    }
+    return false;
+  }
 
   function dedupeTolls(list: Toll[]): Toll[] {
     // Preferimos la clave por nombre; si temes nombres repetidos,
@@ -345,10 +387,24 @@ export default function RoutePlanner(props: Props) {
       routeName: route.summary || undefined,
     });
 
+    const crossed = touchesHuaquillas(path);
+    props.onBorderCrossing?.(crossed);
+
     if (kmNum >= 1600){
       const kmEC = 140;
       const kmPE = kmNum - kmEC;
+      const RL = true;
       props.onCountryKm?.({
+        RL,
+        kmEC: Math.round(kmEC),
+        kmPE: Math.round(kmPE),
+      });
+    } else {
+      const kmEC = 0;
+      const kmPE = 0;
+      const RL = false;
+      props.onCountryKm?.({
+        RL,
         kmEC: Math.round(kmEC),
         kmPE: Math.round(kmPE),
       });
