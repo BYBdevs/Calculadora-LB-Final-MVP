@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "postinstall": "echo Remember to set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY in Vercel"
   },
   "dependencies": {
     "next": "14.2.4",
@@ -14,6 +15,7 @@
     "react-dom": "18.2.0"
   },
   "devDependencies": {
+    "@types/google.maps": "^3.58.1",
     "@types/node": "^20.19.11",
     "@types/react": "^18.3.23",
     "@types/react-dom": "^18.3.7",
