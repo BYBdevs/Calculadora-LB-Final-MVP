@@ -124,7 +124,7 @@ export default function RoutePlanner(props: Props) {
 
     dr.addListener("directions_changed", () => {
       const res = dr.getDirections();
-      if (res) processDirections(res, /*emit*/ true);
+      if (res) processDirections(res);
       scrollSummaryIntoView();
     });
 
