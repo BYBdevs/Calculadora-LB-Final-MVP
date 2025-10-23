@@ -586,6 +586,6 @@ function Reporte({
       <div className="report-card p-6 rounded-2xl">
         {/* ... tu contenido de Reporte igual que antes ... */}
       </div>
-    </div>
+    </Layout>
   );
 }
