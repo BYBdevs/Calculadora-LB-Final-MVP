@@ -95,6 +95,7 @@ export default function RoutePlanner(props: Props) {
   const [tollMarkers, setTollMarkers] = useState<google.maps.Marker[]>([]);
   const [currentTolls, setCurrentTolls] = useState<Toll[]>(props.tollsCatalog || DEFAULT_TOLLS);
   const [waypointInputs, setWaypointInputs] = useState<HTMLInputElement[]>([]);
+  
 
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
@@ -602,7 +603,7 @@ export default function RoutePlanner(props: Props) {
             ref={originRef}
             className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2"
             placeholder="Ej: Puerto Bolívar, Ecuador"
-            defaultValue={props.initialOrigin || ""}
+            defaultValue={props.initialOrigin || "LOGISBUR SA - Centro Logístico, Via Balosa Machala, Machala, Ecuador"}
           />
         </div>
         <div>
