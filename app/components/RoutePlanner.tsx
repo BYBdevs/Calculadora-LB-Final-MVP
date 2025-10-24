@@ -350,6 +350,61 @@ export default function RoutePlanner(props: Props) {
     return out;
   }
 
+  /** Devuelve los km desde que el path entra en el radio del punto frontera hasta el final. */
+  function kmFromBorder(
+    path: google.maps.LatLng[],
+    border: { lat: number; lng: number },
+    radiusMeters: number
+  ): number {
+    if (!path || path.length < 2) return 0;
+    const borderLL = new google.maps.LatLng(border.lat, border.lng);
+
+    // Precalcula qué puntos están dentro del radio del cruce
+    const inside: boolean[] = path.map(p =>
+      google.maps.geometry.spherical.computeDistanceBetween(p, borderLL) <= radiusMeters
+    );
+
+    // primer índice “dentro del radio”
+    const firstIn = inside.findIndex(Boolean);
+    if (firstIn < 0) return 0; // nunca se acercó a la frontera
+
+    // último índice “dentro del radio”
+    let lastIn = -1;
+    for (let i = inside.length - 1; i >= 0; i--) {
+      if (inside[i]) { lastIn = i; break; }
+    }
+
+    // ¿la ruta EMPIEZA en Perú? (al sur del paralelo de Huaquillas)
+    const startsInPeru = path[0].lat() < border.lat;
+
+    let startIdx: number;
+    let endIdx: number;
+
+    if (lastIn > firstIn) {
+      // IDA Y VUELTA: tramo peruano = entre el primer y último contacto
+      startIdx = firstIn;
+      endIdx = lastIn;
+    } else {
+      // SOLO IDA: decidir desde dónde hasta dónde sumar
+      if (startsInPeru) {
+        // empieza en Perú y cruza hacia Ecuador
+        startIdx = 0;
+        endIdx = firstIn; // hasta tocar la frontera
+      } else {
+        // empieza en Ecuador y cruza hacia Perú
+        startIdx = firstIn;       // desde tocar la frontera
+        endIdx = path.length - 1; // hasta el final
+      }
+    }
+
+    // Suma distancias en ese rango
+    let meters = 0;
+    for (let i = startIdx; i < endIdx; i++) {
+      meters += google.maps.geometry.spherical.computeDistanceBetween(path[i], path[i + 1]);
+    }
+    return meters / 1000; // km
+  }
+
 
   function processDirections(result: google.maps.DirectionsResult) {
     const route = result.routes[0];
@@ -391,8 +446,8 @@ export default function RoutePlanner(props: Props) {
     props.onBorderCrossing?.(crossed);
 
     if (kmNum >= 1600){
-      const kmEC = 140;
-      const kmPE = kmNum - kmEC;
+      const kmPE = kmFromBorder(path, HUAQUILLAS, HUAQUILLAS_RADIUS_M);
+      const kmEC = kmNum - kmPE;
       const RL = true;
       props.onCountryKm?.({
         RL,
