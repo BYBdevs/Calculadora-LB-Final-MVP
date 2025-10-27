@@ -3,6 +3,9 @@ import React, {useMemo,useState,useEffect} from "react";
 import Image from "next/image";
 import dynamic from "next/dynamic";
 import { kMaxLength } from "buffer";
+import { pdf } from "@react-pdf/renderer";
+import LogisburPDF from "./components/LogisburPDF";
+
 
 // Carga dinámica del mapa (sin SSR)
 const RoutePlanner = dynamic(() => import("./components/RoutePlanner"), { ssr: false });
@@ -108,7 +111,7 @@ const COSTS_MASTER: CostItem[] = [
   {
     id: "bodega-pe-imp",
     label: "Bodega Perú",
-    unitLabel: "0,30% FOB + 18% IGV (mín. 65)",
+    unitLabel: "",
     ops:["importacion"],
     calc: (ctx) => {
       if (!ctx.fob || ctx.fob<=0) return null;
@@ -124,7 +127,7 @@ const COSTS_MASTER: CostItem[] = [
   {
     id: "bodega-ec-imp",
     label: "Bodega Ecuador",
-    unitLabel: "0,35% CIF + $40 Base + $10 Báscula + 15% IVA (mín. 65)",
+    unitLabel: "",
     ops:["importacion"],
     calc: (ctx) => {
       if (!ctx.fob || ctx.fob<=0) return null;
@@ -140,7 +143,7 @@ const COSTS_MASTER: CostItem[] = [
   {
     id: "seguro-imp",
     label: "Seguro de la carga",
-    unitLabel: "0,30% FOB (mín. 65)",
+    unitLabel: "",
     ops:["importacion"],
     calc: (ctx) => {
       if (!ctx.fob || ctx.fob<=0) return null;
@@ -160,7 +163,7 @@ const COSTS_MASTER: CostItem[] = [
   {
     id: "bodega-pe-exp",
     label: "Bodega Perú",
-    unitLabel: "0,30% CIF + 18% IGV",
+    unitLabel: "",
     ops:["exportacion"],
     calc: (ctx) => {
       if (!ctx.fob || ctx.fob<=0) return null;
@@ -177,7 +180,7 @@ const COSTS_MASTER: CostItem[] = [
   {
     id: "seguro-exp",
     label: "Seguro de la carga",
-    unitLabel: "0,40% FOB (mín. 65)",
+    unitLabel: "",
     ops:["exportacion"],
     calc: (ctx) => {
       if (!ctx.fob || ctx.fob<=0) return null;
@@ -300,6 +303,14 @@ export default function Page(){
 
   const [operacion,setOperacion]=useState<OperationType>("importacion");
 
+  const [logoUrl, setLogoUrl] = useState<string>("");
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setLogoUrl(window.location.origin + "/logo.png");
+    }
+  }, []);
+
+
   /** ====== NUEVO: Contexto FOB/CIF para cálculos de costos adicionales ====== */
   const [fobUSD, setFobUSD] = useState<number>(0);
   const [fleteCIFUSD, setFleteCIFUSD] = useState<number>(0);
@@ -334,6 +345,11 @@ export default function Page(){
 
   const removeCosto=(id:string)=>setCostosSel(prev=>prev.filter(c=>c.id!==id));
   const clearCostos=()=>setCostosSel([]);
+
+  const [producto, setProducto] = useState("");
+  const [unidadCarga, setUnidadCarga] = useState("");
+  const [ciudadReporte, setCiudadReporte] = useState("Machala");
+
 
   // Re-sincronizar valores calculados cuando cambie FOB/flete/%
   useEffect(()=>{
@@ -397,6 +413,32 @@ export default function Page(){
   const pvpMostrado = pvpManual !== "" ? Number(pvpManual) : pvpCalculado; 
   const printPDF=()=>window.print();
 
+  const generatePDF = async () => {
+  const doc = (
+    <LogisburPDF
+      ciudad={ciudadReporte}
+      cliente={cliente}
+      producto={producto}
+      unidadCarga={unidadCarga}
+      origen={origen}
+      destino={destino}
+      valorTransporte={pvpMostrado}
+      costosSel={costosSel}
+      observaciones={observaciones}
+      operacion={operacion}
+      logoUrl={logoUrl}
+    />
+  );
+  const blob = await pdf(doc).toBlob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `Cotizacion_Logisbur_${new Date().toISOString().slice(0,10)}.pdf`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+
   if(!ok) return (
     <div className="min-h-screen flex items-center justify-center bg-slate-100 p-6">
       <div className="bg-white rounded-2xl p-6 w-full max-w-sm ring-1 ring-slate-200 card">
@@ -426,7 +468,19 @@ export default function Page(){
             <div className="flex items-center gap-4">
               {modo!=="comercial" && <div className="text-sm text-slate-700">Costo: <b>{money(res?.base||0)}</b></div>}
               <div className="text-sm text-emerald-700">PVP: <b>{money(pvpMostrado)}</b></div>
-              <button className="px-3 py-1.5 rounded-lg bg-slate-900 text-white" onClick={printPDF}> Generar Reporte </button>
+              <button className="px-3 py-1.5 rounded-lg bg-slate-900 text-white" onClick={generatePDF}> Generar Reporte </button>
+              <Reporte
+              ciudad={ciudadReporte}
+              cliente={cliente}
+              producto={producto}
+              unidadCarga={unidadCarga}
+              origen={origen}
+              destino={destino}
+              valorTransporte={pvpMostrado}
+              costosSel={costosSel}
+              observaciones={observaciones}
+              operacion={operacion} // importacion / exportacion / transito
+            />
               <button className="px-3 py-1.5 rounded-lg ring-1 ring-slate-200" onClick={()=>setOpenMapa(v=>!v)}>{openMapa ? "Ocultar mapa" : "Abrir mapa"}</button>
             </div>
           </div>
@@ -451,8 +505,12 @@ export default function Page(){
               <Text label="Destino" v={destino} set={setDestino}/>
             </div>
             <div className="grid grid-cols-2 gap-2 mt-2">
-              <Text label="Cliente (opcional)" v={cliente} set={setCliente}/>
+              <Text label="Cliente" v={cliente} set={setCliente}/>
               <Text label="Nombre de ruta (opcional)" v={rutaNombre} set={setRutaNombre}/>
+            </div>
+            <div className="grid grid-cols-2 gap-2 mt-2">
+              <Text label="Producto" v={producto} set={setProducto}/>
+              <Text label="Unidad de carga" v={unidadCarga} set={setUnidadCarga}/>
             </div>
 
             {modo!=="logisbur"?(
@@ -1013,21 +1071,119 @@ const PercentField=({label,value,onChange}:{label:string,value:number,onChange:(
 
 /* Reporte (placeholder, no se usa directamente) */
 function Reporte({
-  modo, cliente, rutaNombre, origen, destino, km,
-  dias, credito, peajesUSD, tn, por, res, cfg, vehNombre
+  ciudad,
+  cliente,
+  producto,
+  unidadCarga,
+  origen,
+  destino,
+  valorTransporte,
+  costosSel,
+  observaciones,
+  operacion,
 }: {
-  modo: "interno" | "comercial" | "logisbur";
-  cliente: string; rutaNombre: string; origen: string; destino: string; km: number;
-  dias: number; credito: number; peajesUSD: number; tn: number;
-  por: any[]; res: any; cfg: any; vehNombre: string;
+  ciudad: string;
+  cliente: string;
+  producto: string;
+  unidadCarga: string;
+  origen: string;
+  destino: string;
+  valorTransporte: number;
+  costosSel: Array<{ id:string; label:string; unitUSD?:number; unitLabel?:string }>;
+  observaciones: string;
+  operacion: "importacion" | "exportacion" | "transito";
 }) {
-  const fecha = new Date().toLocaleString();
-  const showCostos = (modo !== "comercial");
+  const hoy = new Date();
+  const fecha = hoy.toLocaleDateString();
+  const hora  = hoy.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+
+  const listaAdic = costosSel.map(c=>{
+    const isNum = isFinite(Number(c.unitUSD));
+    const texto = isNum ? money(Number(c.unitUSD)) : (c.unitLabel || "—");
+    return `${c.label}${c.unitLabel?` (${c.unitLabel})`:""}: ${isNum ? texto : texto}`;
+  });
+
+  const tituloOp = operacion === "importacion"
+    ? "IMPORTACIÓN"
+    : operacion === "exportacion"
+      ? "EXPORTACIÓN"
+      : "TRÁNSITO";
+
   return (
-    <div className="only-print">
-      <div className="report-card p-6 rounded-2xl">
-        {/* contenido de reporte */}
+    <div className="only-print text-[13px] leading-5 text-slate-800">
+      {/* Encabezado */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <img src="/logo.png" alt="LOGISBUR" width={64} height={64}/>
+          <div>
+            <div className="text-2xl font-extrabold tracking-wide">LOGISBUR</div>
+            <div className="text-[11px] text-slate-500">www.logisbur.com.ec</div>
+          </div>
+        </div>
+        <div className="text-right">
+          <div>{ciudad}, {fecha}</div>
+          <div className="text-[11px] text-slate-500">{hora}</div>
+        </div>
+      </div>
+
+      <div className="h-1.5 w-full bg-orange-500 mb-4"></div>
+
+      {/* Cuerpo */}
+      <p className="mb-4">Estimado,</p>
+      <p className="mb-4">
+        Por medio de la presente, ponemos a su conocimiento los valores de logística solicitados:
+      </p>
+
+      <div className="grid grid-cols-2 gap-3 mb-3">
+        <div><span className="font-semibold">Producto:</span><br/>{producto || "—"}</div>
+        <div><span className="font-semibold">Unidad de Carga:</span><br/>{unidadCarga || "—"}</div>
+        <div><span className="font-semibold">Origen:</span><br/>{origen || "—"}</div>
+        <div><span className="font-semibold">Destino:</span><br/>{destino || "—"}</div>
+      </div>
+
+      <div className="mb-4">
+        <span className="font-semibold">Valor de Transporte</span>:&nbsp;
+        <span>Usd&nbsp;<b>{money(valorTransporte).replace("$ ","")}</b>&nbsp;</span>
+        <span className="text-slate-600">Por unidad</span>
+      </div>
+
+      <div className="mb-1 font-bold text-orange-600">{tituloOp}:</div>
+      <div className="mb-2 font-semibold">Costos Adicionales:</div>
+      <div className="min-h-[72px] border rounded-md p-3 whitespace-pre-line">
+        {listaAdic.length ? (
+          <ul className="list-disc pl-5">
+            {listaAdic.map((t,i)=><li key={i}>{t}</li>)}
+          </ul>
+        ) : "—"}
+      </div>
+
+      <div className="mt-3 mb-1 font-semibold">Observaciones:</div>
+      <div className="min-h-[56px] border rounded-md p-3 whitespace-pre-wrap">
+        {observaciones || "—"}
+      </div>
+
+      <div className="mt-4 font-semibold">Condición de pago:</div>
+      <div className="border rounded-md p-3 mt-1">
+        <div className="mb-2"><b>Plazo:</b> {cliente ? "Por confirmar con " + cliente : "Por confirmar"}</div>
+        <div className="mb-2"><b>El pago se debe realizar</b> a través de depósito o transferencia a:</div>
+        <div className="mb-2">
+          <b>Datos del beneficiario:</b><br/>
+          BURNEO LOGÍSTICA CARGA INTERNACIONAL LOGISBUR S.A.<br/>
+          RUC: 0791796571001<br/>
+          Banco Pichincha C.A.<br/>
+          Número de Cta. Corriente: <b>2100169035</b><br/>
+          SWIFT: <b>PICHCEEQ</b><br/>
+          <b>Gastos de envío:</b> Full Transfer Value - OUR<br/>
+          <span className="text-[11px] text-slate-500">*Costos por transferencia no serán asumidos por Logisbur S.A.</span>
+        </div>
+      </div>
+
+      {/* Pie */}
+      <div className="mt-6 flex items-center justify-between text-[11px] text-slate-500">
+        <div>Arízaga 613 y Los Sauces, Machala, El Oro, Ec. · 0995977779 · 0987226916</div>
+        <img src="/logo.png" alt="LOGISBUR" width={32} height={32}/>
       </div>
     </div>
   );
 }
+

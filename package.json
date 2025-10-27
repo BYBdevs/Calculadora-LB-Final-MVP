@@ -10,6 +10,7 @@
     "postinstall": "echo Remember to set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY in Vercel"
   },
   "dependencies": {
+    "@react-pdf/renderer": "^4.3.1",
     "next": "14.2.4",
     "react": "18.2.0",
     "react-dom": "18.2.0"
