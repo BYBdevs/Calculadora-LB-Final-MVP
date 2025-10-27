@@ -9,11 +9,13 @@ const RoutePlanner = dynamic(() => import("./components/RoutePlanner"), { ssr: f
 
 /* ===== Base data ===== */
 const GLOBAL={precioGalonEC:2.8,precioGalonPE:4.3,tasaAnual:0.13,costoConductorDia:40,costoAdminFijoDia:18,viaticoEC:10,viaticoPE:15,vidaUtilKm:1_000_000,factorDepreciacion:0.7,margenInternoDefault:0.40,margenComercialDefault:0.50,cruceFronteraUSD:10,bufferPreFronteraKm:70};
+
 const VEHICULOS=[
   {id:"2e",nombre:"Camión 2 ejes",ejes:2,capacidadTn:15,rendKmGal:14,baseDepreciacionUSD:60000,insumos:{llantasKm:0.014,aceiteMotorKm:0.0137,aceiteCoronaKm:0.002,filtrosKm:0.0017},capacidadGalDefault:200},
   {id:"3e",nombre:"Mula 3 ejes",ejes:3,capacidadTn:24,rendKmGal:11,baseDepreciacionUSD:90000,insumos:{llantasKm:0.0233,aceiteMotorKm:0.0137,aceiteCoronaKm:0.002,filtrosKm:0.0017},capacidadGalDefault:200},
   {id:"6e",nombre:"Trailer 6 ejes",ejes:6,capacidadTn:31,rendKmGal:8,baseDepreciacionUSD:106000,insumos:{llantasKm:0.0512,aceiteMotorKm:0.0137,aceiteCoronaKm:0.002,filtrosKm:0.0017},capacidadGalDefault:200}
 ];
+
 const PEAJES = [
   { sec: 1, nombre: "PINTAG", usd: 12.00 },
   { sec: 2, nombre: "CADENA", usd: 12.00 },
@@ -53,22 +55,147 @@ const PEAJES = [
   { sec: 36, nombre: "DURAN/TAMBO", usd: 12.00 },
 ];
 
+type OperationType = "importacion" | "exportacion" | "transito";
+
+/** ====== NUEVO: Modelo de ítems con soporte por operación y fórmulas (FOB/CIF) ====== */
+type FixedValsByOp = Partial<Record<OperationType, number>>;
+type CostItem = {
+  id:string;
+  label:string;
+  unitLabel?:string;
+  /** Si es un valor fijo, usar unitUSD o valuesByOp. Si depende de FOB/CIF, dejar unitUSD = undefined y usar calc */
+  unitUSD?:number;
+  valuesByOp?: FixedValsByOp; // para tener distintos valores en importación/exportación
+  /** Si requiere cálculo con FOB/CIF. Devuelve null si no hay datos suficientes (para mostrar fórmula). */
+  calc?:(ctx:FOBCtx)=>number|null;
+  formulaHint?:string; // texto a mostrar cuando no hay FOB
+};
+
+type FOBCtx = {
+  fob:number;           // FOB USD (0 si vacío)
+  fleteCIF:number;      // Flete a usar para CIF (opcional)
+  seguroPct:number;     // p.ej. 0.003 = 0.30 %
+  igvPct:number;        // Perú
+  ivaECPct:number;      // Ecuador
+  bodePEPct:number;     // 0.003 (0.30%)
+  bodeECBase:number;    // 40 USD base
+  bodeECPct:number;     // 0.0035 (0.35%)
+  minBodega:number;     // 65 USD
+  minSeguro:number;     // 65 USD
+};
+
+const FOB_DEFAULTS: FOBCtx = {
+  fob:0,
+  fleteCIF:0,
+  seguroPct:0.003, // 0.30%
+  igvPct:0.18,
+  ivaECPct:0.15,
+  bodePEPct:0.003, // 0.30% FOB
+  bodeECBase:40,
+  bodeECPct:0.0035, // 0.35% CIF
+  minBodega:65,
+  minSeguro:65
+};
+
+/** Catálogo maestro (mismos ítems para import/export; puedes ajustar valores por operación en valuesByOp) */
+const COSTS_MASTER: CostItem[] = [
+  { id: "agencia-pe", label: "Agencia Perú", valuesByOp: { importacion:120, exportacion:120 }, unitLabel:"servicio" },
+  // Bodega Perú: 0,30% FOB + 18% IGV (mín. 65)
+  {
+    id: "bodega-pe",
+    label: "Bodega Perú",
+    unitLabel: "0,30% FOB + 18% IGV (mín. 65)",
+    calc: (ctx) => {
+      if (!ctx.fob || ctx.fob<=0) return null;
+      const base = Math.max(ctx.minBodega, ctx.fob * ctx.bodePEPct);
+      return base * (1 + ctx.igvPct);
+    },
+    formulaHint: "0,30% FOB × (1+IGV) (mín. 65)"
+  },
+  { id: "agencia-ec", label: "Agencia Ecuador (incluye IVA)", valuesByOp: { importacion:265, exportacion:265 }, unitLabel:"servicio" },
+  // Bodega Ecuador: 0,35% CIF + $40 base + 15% IVA (mín. 65)
+  {
+    id: "bodega-ec",
+    label: "Bodega Ecuador",
+    unitLabel: "0,35% CIF + $40 + 15% IVA (mín. 65)",
+    calc: (ctx) => {
+      if (!ctx.fob || ctx.fob<=0) return null;
+      const seguro = Math.max(ctx.minSeguro, ctx.fob * ctx.seguroPct);
+      const cif = ctx.fob + (ctx.fleteCIF || 0) + seguro;
+      const base = Math.max(ctx.minBodega, cif * ctx.bodeECPct + ctx.bodeECBase);
+      return base * (1 + ctx.ivaECPct);
+    },
+    formulaHint: "0,35% CIF + 40, luego × (1+IVA) (mín. 65)"
+  },
+  // Seguro de carga: 0,30% FOB (mín. 65)
+  {
+    id: "seguro",
+    label: "Seguro de carga",
+    unitLabel: "0,30% FOB (mín. 65)",
+    calc: (ctx) => {
+      if (!ctx.fob || ctx.fob<=0) return null;
+      return Math.max(ctx.minSeguro, ctx.fob * ctx.seguroPct);
+    },
+    formulaHint: "0,30% FOB (mín. 65)"
+  },
+];
+
+/** Catálogo para Tránsito (sin cambios funcionales) */
+const COSTS_TRANSIT: CostItem[] = [
+  { id: "mov-fron",   label: "Movilidad Frontera", unitUSD: 45 },
+  { id: "standby",    label: "Stand by", unitUSD: 240, unitLabel: "x día x contenedor" },
+  { id: "rep-control",label: "Representante control", unitUSD: 150, unitLabel: "x contenedor" },
+  { id: "generador",  label: "Generador x día", unitUSD: 130, unitLabel: "x día x contenedor" },
+  { id: "candado",    label: "Candado satelital", unitUSD: 80 },
+  { id: "recep-pto",  label: "Recepción Pto. Bolívar", unitUSD: 45 },
+  { id: "horas-extra",label: "Horas extra (correspondiente al embarque)", unitUSD: 10, unitLabel: "x hora x contenedor" },
+  { id: "mod-docs",   label: "Modificación documentos", unitUSD: 30, unitLabel: "x trámite" },
+  { id: "rep-aforo",  label: "Representante para aforo narcóticos", unitUSD: 180, unitLabel: "x contenedor" },
+];
+
+/** Genera catálogo por operación (import/export comparten ítems pero con distintos unitUSD fijos cuando aplique) */
+const getCatalog=(op:OperationType, fobCtx:FOBCtx): CostItem[]=>
+  op==="transito"
+    ? COSTS_TRANSIT
+    : COSTS_MASTER.map(ci=>{
+        // clonar
+        const out: CostItem = {...ci};
+        // Si tiene valores fijos por operación, resolverlos
+        if (ci.valuesByOp && typeof ci.valuesByOp[op] === "number") {
+          out.unitUSD = ci.valuesByOp[op]!;
+        } else {
+          // Mantener unitUSD si vino fijo en el maestro
+          if (typeof ci.unitUSD === "number") out.unitUSD = ci.unitUSD;
+          else out.unitUSD = undefined; // la calculará calc (si existe) o mostrará fórmula
+        }
+        // Si hay calc (depende de FOB/CIF), calcular ahora
+        if (ci.calc) {
+          const val = ci.calc(fobCtx);
+          if (val===null) {
+            out.unitUSD = NaN; // marcar como "sin valor" (mostrar fórmula / no sumar)
+          } else {
+            out.unitUSD = Number(val.toFixed(2));
+          }
+        }
+        return out;
+      });
+
 const money=(n:number)=>`$ ${Number(n||0).toFixed(2)}`;
 const r5=(n:number)=>Math.ceil(n/5)*5;
 
 /* ===== App ===== */
 export default function Page(){
-  const [openMapa, setOpenMapa] = useState(false); // <-- AQUÍ, dentro del componente
+  const [openMapa, setOpenMapa] = useState(false); // dentro del componente
 
+  // Acceso
   const [llave,setLlave]=useState("");
   const [ok, setOk] = useState(false);
   useEffect(() => {
-    try {
-      setOk(typeof window !== "undefined" && sessionStorage.getItem("llave_ok") === "1");
-    } catch {}
+    try { setOk(typeof window !== "undefined" && sessionStorage.getItem("llave_ok") === "1"); } catch {}
   }, []);
   const validar=()=>{ if(llave==="2407"){ setOk(true); sessionStorage.setItem("llave_ok","1"); } else { alert("Llave incorrecta"); setOk(false); sessionStorage.removeItem("llave_ok"); } };
 
+  // Config base
   const DEFAULT = useMemo(() => ({
     ...GLOBAL,
     vehicles: Object.fromEntries(
@@ -80,15 +207,10 @@ export default function Page(){
       }])
     )
   }), []);
-
   useEffect(() => {
     if (typeof window === "undefined") return;
-    try {
-      const saved = JSON.parse(localStorage.getItem("cfg") || "null");
-      if (saved) setCfg(saved);
-    } catch {}
+    try { const saved = JSON.parse(localStorage.getItem("cfg") || "null"); if (saved) setCfg(saved); } catch {}
   }, []);
-
   const [cfg, setCfg] = useState<any>(DEFAULT);
   const VEH=useMemo(()=>VEHICULOS.map(v=>({ ...v, ...cfg.vehicles?.[v.id], insumos:{...v.insumos,...(cfg.vehicles?.[v.id]?.insumos||{})} })),[cfg]);
 
@@ -114,7 +236,6 @@ export default function Page(){
 
   const [margen,setMargen]=useState(cfg.margenInternoDefault*100);
   useEffect(()=>setMargen(cfg.margenInternoDefault*100),[cfg.margenInternoDefault]);
-  const [extras,setExtras]=useState(0);
 
   const initCaps=useMemo(()=>Object.fromEntries(VEH.map(v=>[v.id,v.capacidadGalDefault||200])),[VEH]);
   const [caps,setCaps]=useState<any>(initCaps);
@@ -123,6 +244,52 @@ export default function Page(){
   // Logisbur
   const [tn,setTn]=useState(0),[dPeru,setDPeru]=useState(0),[mixto,setMixto]=useState(false),[kmEC,setKmEC]=useState(0),[kmPE,setKmPE]=useState(0);
   const [cruceOn,setCruceOn]=useState(false);
+
+  const [observaciones, setObservaciones] = useState("");
+  const [pvpManual, setPvpManual] = useState<string>("");
+
+
+  const [operacion,setOperacion]=useState<OperationType>("importacion");
+
+  /** ====== NUEVO: Contexto FOB/CIF para cálculos de costos adicionales ====== */
+  const [fobUSD, setFobUSD] = useState<number>(0);
+  const [fleteCIFUSD, setFleteCIFUSD] = useState<number>(0);
+  const [seguroPct, setSeguroPct] = useState<number>(FOB_DEFAULTS.seguroPct * 100); // UI en %
+  const fobCtx: FOBCtx = useMemo(()=>({
+    ...FOB_DEFAULTS,
+    fob: Number(fobUSD)||0,
+    fleteCIF: Number(fleteCIFUSD)||0,
+    seguroPct: Math.max(0, Number(seguroPct||0))/100
+  }),[fobUSD,fleteCIFUSD,seguroPct]);
+
+  type SelectedCost = (CostItem);
+  const catalogo = useMemo(()=>getCatalog(operacion, fobCtx),[operacion,fobCtx]);
+
+  const [costosSel,setCostosSel]=useState<SelectedCost[]>([]);
+  useEffect(()=>{ setCostosSel([]); },[operacion]); // al cambiar operación, limpiar
+  const toggleCosto=(it:CostItem)=> setCostosSel(prev=>{
+    const i=prev.findIndex(x=>x.id===it.id);
+    if(i>=0) return prev.filter((_,idx)=>idx!==i);
+    // tomar valor actual del catálogo (con cálculo hecho)
+    const curr = catalogo.find(c=>c.id===it.id);
+    return [...prev,{...(curr||it)}];
+  });
+  const removeCosto=(id:string)=>setCostosSel(prev=>prev.filter(c=>c.id!==id));
+  const clearCostos=()=>setCostosSel([]);
+
+  // Re-sincronizar valores calculados cuando cambie FOB/flete/%
+  useEffect(()=>{
+    setCostosSel(prev => prev.map(sel=>{
+      const cat = catalogo.find(c=>c.id===sel.id);
+      return cat ? {...sel, unitUSD: cat.unitUSD} : sel;
+    }));
+  },[catalogo]);
+
+  const totalCostosAdic=useMemo(()=>costosSel.reduce((s,c)=>{
+    const u = Number(c.unitUSD);
+    if (!isFinite(u)) return s; // NaN => sin FOB (mostrar fórmula, no sumar)
+    return s + u;
+  },0),[costosSel]);
 
   const kgForm=useMemo(()=>s25*25+s30*30+s45*45+s50*50,[s25,s30,s45,s50]);
   const tnForm=kgForm/1000;
@@ -145,13 +312,16 @@ export default function Page(){
     const dPE=Math.max(0,Math.min(dias,dPeru)), dEC=Math.max(0,dias-dPE);
     const per=dias*cfg.costoConductorDia + dEC*cfg.viaticoEC + dPE*cfg.viaticoPE + dias*cfg.costoAdminFijoDia;
     const cf=(modo==="logisbur"&&cruceOn)?cfg.cruceFronteraUSD:0;
-    const sub0=comb+ins+dep+p+per+cf+extras, fin=sub0*(cfg.tasaAnual/365)*credito, sub=sub0+fin, min=per+p+cf, base=Math.max(sub,min);
+    const sub0=comb+ins+dep+p+per+cf, fin=sub0*(cfg.tasaAnual/365)*credito, sub=sub0+fin, min=per+p+cf, base=Math.max(sub,min);
     const m=modo==="comercial"?cfg.margenComercialDefault:Math.min(Math.max(margen/100,0),0.95); const pvp=r5(base/(1-m));
     const cKg=kgUse>0?base/kgUse:0, vKg=kgUse>0?pvp/kgUse:0;
-    const row=(w:number,q:number)=>q?{w,q,c:cKg*w,v:vKg*w}:null; const por=[row(25,s25),row(30,s30),row(45,s45),row(50,s50)].filter(Boolean) as any[];
+    const row=(w:number,q:number)=>q?{w,q,c:cKg*w,v:vKg*w}:null; const por=( [row(25,s25),row(30,s30),row(45,s45),row(50,s50)].filter(Boolean) as any[]);
     return {cap,comb,cEC,cPE,pref,cec,pexc,ins,dep,peajes:p,per,dEC,dPE,fin,cf,sub,base,pvp,por};
-  },[V,veh,caps,km,dias,credito,peajes,kgUse,s25,s30,s45,s50,extras,margen,modo,dPeru,mixto,kmEC,kmPE,cfg,cruceOn]);
+  },[V,veh,caps,km,dias,credito,peajes,kgUse,s25,s30,s45,s50,margen,modo,dPeru,mixto,kmEC,kmPE,cfg,cruceOn]);
 
+
+  const pvpCalculado = res?.pvp || 0; // PVP calculado por el sistema
+  const pvpMostrado = pvpManual !== "" ? Number(pvpManual) : pvpCalculado; 
   const printPDF=()=>window.print();
 
   if(!ok) return (
@@ -182,7 +352,7 @@ export default function Page(){
             </div>
             <div className="flex items-center gap-4">
               {modo!=="comercial" && <div className="text-sm text-slate-700">Costo: <b>{money(res?.base||0)}</b></div>}
-              <div className="text-sm text-emerald-700">PVP: <b>{money(res?.pvp||0)}</b></div>
+              <div className="text-sm text-emerald-700">PVP: <b>{money(pvpMostrado)}</b></div>
               <button className="px-3 py-1.5 rounded-lg bg-slate-900 text-white" onClick={printPDF}> Generar Reporte </button>
               <button className="px-3 py-1.5 rounded-lg ring-1 ring-slate-200" onClick={()=>setOpenMapa(v=>!v)}>{openMapa ? "Ocultar mapa" : "Abrir mapa"}</button>
             </div>
@@ -284,10 +454,135 @@ export default function Page(){
             )}
 
             <div className="grid grid-cols-2 gap-2 mt-3">
-              {(modo!=="comercial")&&<Num label="Margen (%)" v={margen} set={v=>setMargen(Math.max(0,Math.min(95,Number(v))))}/>}
-              <Num label="Costos adicionales ($)" v={extras} set={v=>setExtras(Math.max(0,Number(v)))}/>
+              {modo!=="comercial" && (
+                <>
+                  <Num
+                    label="Margen (%)"
+                    v={margen}
+                    set={v=>setMargen(Math.max(0,Math.min(95,Number(v))))}
+                  />
+                  <div>
+                    <div className="text-xs text-slate-500 mb-1">Modificar PVP</div>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={pvpManual}
+                      onChange={(e)=>setPvpManual(e.target.value)}
+                      placeholder={pvpCalculado.toFixed(2)}
+                      className="w-full border rounded-lg px-3 py-2"
+                    />
+                    {pvpManual !== "" && (
+                      <div className="text-[11px] text-slate-500 mt-1">
+                        (Usando PVP manual)
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
+
             <div className="text-[11px] text-slate-500 mt-1">Administrativo fijo: {money(cfg.costoAdminFijoDia)}/día</div>
+
+            {/** ===================== BLOQUE LOGISBUR – COSTOS ADICIONALES ===================== */}
+            {modo==="logisbur" && (
+              <div className="mt-3 rounded-lg border p-3">
+                <div className="text-xs text-slate-500 mb-1">Tipo de operación</div>
+                <select className="w-full border rounded-lg px-3 py-2 mb-3"
+                        value={operacion} onChange={e=>setOperacion(e.target.value as OperationType)}>
+                  <option value="importacion">Importación</option>
+                  <option value="exportacion">Exportación</option>
+                  <option value="transito">Tránsito</option>
+                </select>
+
+                {/** NUEVO: Parámetros de FOB/CIF */}
+                {operacion!=="transito" && (
+                  <div className="grid sm:grid-cols-3 gap-2 mb-2">
+                    <Num label="FOB (USD)" v={fobUSD} set={(v:number)=>setFobUSD(Math.max(0,Number(v)))} />
+                    <Num label="Flete para CIF (opcional, USD)" v={fleteCIFUSD} set={(v:number)=>setFleteCIFUSD(Math.max(0,Number(v)))} />
+                    <Num label="Seguro (%)" v={seguroPct} set={(v:number)=>setSeguroPct(Math.max(0,Number(v)))} />
+                  </div>
+                )}
+                {operacion!=="transito" && (
+                  <div className="text-[11px] text-slate-500 mb-2">
+                    Si <b>FOB</b> está vacío, los ítems con % mostrarán la <b>fórmula</b> y no se sumarán al total.
+                  </div>
+                )}
+
+                <div className="text-sm font-semibold mb-1">Costos adicionales (opcional)</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {catalogo.map(item=>{
+                    const sel=costosSel.find(c=>c.id===item.id);
+                    const checked=!!sel;
+                    const hasNumeric = isFinite(Number(item.unitUSD));
+                    const rightText = hasNumeric ? money(Number(item.unitUSD)) : (item.formulaHint || item.unitLabel || "—");
+                    return (
+                      <div key={item.id} className="rounded-lg border px-2 py-2 text-sm">
+                        <label className="flex items-center justify-between">
+                          <span className="flex items-center gap-2">
+                            <input type="checkbox" checked={checked} onChange={()=>toggleCosto(item)}/>
+                            {item.label}
+                          </span>
+                          <span className={`tabular-nums ${hasNumeric?"":"text-slate-500 italic"}`}>{rightText}</span>
+                        </label>
+                        {item.unitLabel && <div className="text-[11px] text-slate-500 ml-6">({item.unitLabel})</div>}
+                        {checked && (
+                          <div className="flex items-center gap-2 ml-6 mt-1">
+                             <b>Línea:</b>{" "}
+                            {isFinite(Number(sel?.unitUSD))
+                              ? <span>{money(Number(sel?.unitUSD||0))}</span>
+                              : <span className="text-slate-500 italic">{item.formulaHint || item.unitLabel || "fórmula"}</span>}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  
+                </div>
+
+                {/* Manuales */}
+                {costosSel.filter(c=>c.id.startsWith("custom-")).length>0 && (
+                  <div className="mt-2">
+                    <div className="text-xs text-gray-500 mb-1">Líneas agregadas manualmente</div>
+                    <div className="space-y-1">
+                      {costosSel.filter(c=>c.id.startsWith("custom-")).map(c=>(
+                        <div key={c.id} className="flex items-center justify-between rounded-lg border px-2 py-1 text-sm">
+                          <div>
+                            <div>{c.label}</div>
+                            {c.unitLabel && <div className="text-[11px] text-slate-500">({c.unitLabel})</div>}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="tabular-nums">{money(Number(c.unitUSD||0))}</span>
+                            <button className="text-xs underline" onClick={()=>removeCosto(c.id)}>quitar</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="mt-2 flex items-center gap-2">
+                  <button onClick={()=>{
+                    const label=prompt("Descripción del costo:");
+                    if(!label) return;
+                    const unitUSD=Number(prompt("Precio unitario (USD):")||"0");
+                    if(Number.isNaN(unitUSD)) return;
+                    const unitLabel=prompt("Unidad (opcional)")||undefined;
+                    setCostosSel(prev=>[...prev,{id:`custom-${Date.now()}`,label,unitUSD:Number(unitUSD.toFixed(2)),unitLabel}]);
+                  }} className="text-xs rounded-md border px-2 py-1">+ Agregar línea</button>
+                  <button onClick={clearCostos} className="text-xs rounded-md border px-2 py-1">Limpiar</button>
+                  <div className="ml-auto text-sm"><b>Total:</b> {money(totalCostosAdic)}</div>
+                </div>
+                <div className="mt-3">
+                  <div className="text-sm font-semibold mb-1">Observaciones</div>
+                  <textarea
+                    className="w-full border rounded-lg px-3 py-2 text-sm min-h-[96px]"
+                    placeholder="Escribe observaciones, condiciones, notas internas…"
+                    value={observaciones}
+                    onChange={(e)=>setObservaciones(e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Resultados */}
@@ -296,7 +591,6 @@ export default function Page(){
               <>
                 {(modo!=="comercial")?(
                   <>
-
                     {/* Mapa embebido en Logisbur */}
                     {modo === "logisbur" && openMapa && (
                       <div className="mt-3 h-[70vh] rounded-xl overflow-hidden ring-1 ring-slate-200">
@@ -369,10 +663,37 @@ export default function Page(){
                       </tbody>
                     </table>
 
+                    {/* Resumen informativo de costos adicionales */}
+                    {modo==="logisbur" && (
+                      <div className="mt-3 rounded-lg border p-3">
+                        <div className="flex items-center justify-between">
+                          <div className="font-semibold text-sm">Costos adicionales seleccionados</div>
+                          <div className="text-sm"><b>Total:</b> {money(totalCostosAdic)}</div>
+                        </div>
+                        {costosSel.length===0?(
+                          <div className="text-xs text-slate-500 mt-1">— Ninguno —</div>
+                        ):(
+                          <div className="mt-2 space-y-1">
+                            {costosSel.map(c=>{
+                              const isNum = isFinite(Number(c.unitUSD));
+                              return (
+                                <div key={c.id} className="flex items-center justify-between text-sm">
+                                  <span>{c.label}{c.unitLabel?` (${c.unitLabel})`:""}</span>
+                                  {isNum
+                                    ? <span className="tabular-nums"><b>{money(Number(c.unitUSD))}</b></span>
+                                    : <span className="text-slate-500 italic">{(c.formulaHint||c.unitLabel||"fórmula")}</span>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     <div className="grid sm:grid-cols-3 gap-2 mt-3">
                       <Kpi label="Subtotal" v={res.sub}/>
                       <Kpi label="Costo aplicado (mínimo)" v={res.base} hi/>
-                      <Kpi label="PVP del flete (redondeado)" v={res.pvp}/>
+                      <Kpi label="PVP del flete (redondeado)" v={pvpMostrado}/>
                     </div>
 
                     {modo!=="logisbur" && res.por.length>0 && (
@@ -387,7 +708,7 @@ export default function Page(){
                         origen={origen} destino={destino}
                         km={km} mixto={mixto} kmEC={kmEC} kmPE={kmPE} cap={res.cap}
                         peajesUSD={peajes} dEC={res.dEC} dPE={res.dPE} tn={tn}
-                        costo={res.base} pvp={res.pvp}
+                        costo={res.base} pvp={pvpMostrado}
                         rutaNombre={rutaNombre} cliente={cliente}
                       />
                     )}
@@ -397,12 +718,16 @@ export default function Page(){
                     <h3 className="font-medium text-slate-700 mb-2">Precio del servicio (Comercial)</h3>
                     <div className="bg-emerald-50 ring-1 ring-emerald-100 rounded-xl p-4">
                       <div className="text-xs text-emerald-700 uppercase">Total a pagar</div>
-                      <div className="text-3xl font-semibold text-emerald-900">{money(res.pvp)}</div>
+                      <div className="text-3xl font-semibold text-emerald-900">{money(pvpMostrado)}</div>
                     </div>
                     {res.por.length>0&&(
-                      <div className="grid sm:grid-cols-4 gap-2 mt-3">{res.por.map((r:any,i:number)=>(<div key={i} className="p-3 ring-1 ring-slate-200 rounded-xl text-center">
-                        <div className="text-xs text-slate-500">{r.w} kg</div><div className="text-xl font-semibold">{money(r.v)}</div><div className="text-xs text-slate-500">Cant: {r.q}</div>
-                      </div>))}</div>
+                      <div className="grid sm:grid-cols-4 gap-2 mt-3">{res.por.map((r:any,i:number)=>(
+                        <div key={i} className="p-3 ring-1 ring-slate-200 rounded-xl text-center">
+                          <div className="text-xs text-slate-500">{r.w} kg</div>
+                          <div className="text-xl font-semibold">{money(r.v)}</div>
+                          <div className="text-xs text-slate-500">Cant: {r.q}</div>
+                        </div>
+                      ))}</div>
                     )}
                   </>
                 )}
@@ -438,7 +763,7 @@ function NarrativaLogisbur({
     <div className="mt-3 p-4 ring-1 ring-slate-200 rounded-xl bg-white text-sm text-slate-700">
       Ruta planificada: <b>Trailer</b>
       {(origen !== "—" || destino !== "—") && <> de <b>{origen}</b> a <b>{destino}</b></>}
-      {rutaNombre && <> — <b>{rutaNombre}</b></>}{" "}
+      {rutaNombre && <> — <b>{rutaNombre}</b></>}{' '}
       para el cliente {cliente ? <b>{cliente}</b> : <i>(no especificado)</i>}.
       Se recorrerán <b>{Number(km || 0).toFixed(0)} km</b>.
       El viaje contempla <b>{Number(dEC || 0).toFixed(0)} día(s)</b> en Ecuador y <b>{Number(dPE || 0).toFixed(0)} día(s)</b> en Perú.
@@ -451,8 +776,7 @@ function NarrativaLogisbur({
 
 /* Peaje Modal — solo listado completo */
 function PeajeModal({ onClose }: { onClose: () => void }) {
-  // Usa el arreglo PEAJES ya existente en tu page.tsx
-  const lista = PEAJES; // [{sec,nombre,usd}, ...]
+  const lista = PEAJES;
   const total = useMemo(() => lista.reduce((a, p) => a + (p.usd || 0), 0), [lista]);
 
   return (
@@ -466,20 +790,13 @@ function PeajeModal({ onClose }: { onClose: () => void }) {
         <div className="p-4">
           <div className="flex items-center justify-between text-sm mb-2">
             <div>{lista.length} peajes</div>
-            <div>
-              Total (suma mostrada):{" "}
-              <b>{`$ ${Number(total || 0).toFixed(2)}`}</b>
-            </div>
+            <div> Total (suma mostrada): <b>{`$ ${Number(total || 0).toFixed(2)}`}</b> </div>
           </div>
 
           <div className="max-h-96 overflow-auto border rounded-lg">
             <table className="w-full text-sm">
               <thead className="bg-slate-50">
-                <tr>
-                  <Th>#</Th>
-                  <Th>Peaje</Th>
-                  <Th>USD (ida+vuelta)</Th>
-                </tr>
+                <tr><Th>#</Th><Th>Peaje</Th><Th>USD (ida+vuelta)</Th></tr>
               </thead>
               <tbody>
                 {lista.map((p) => (
@@ -494,19 +811,13 @@ function PeajeModal({ onClose }: { onClose: () => void }) {
           </div>
 
           <div className="mt-3 text-right">
-            <button
-              className="px-3 py-2 rounded-lg ring-1 ring-slate-200"
-              onClick={onClose}
-            >
-              Cerrar
-            </button>
+            <button className="px-3 py-2 rounded-lg ring-1 ring-slate-200" onClick={onClose}>Cerrar</button>
           </div>
         </div>
       </div>
     </div>
   );
 }
-
 
 /* Config Modal */
 function CfgModal({val,onClose,onSave}:{val:any,onClose:()=>void,onSave:(v:any)=>void}){
@@ -515,53 +826,60 @@ function CfgModal({val,onClose,onSave}:{val:any,onClose:()=>void,onSave:(v:any)=
   const setV=(id:string,k:string,v:any)=>setF((p:any)=>({ ...p, vehicles:{...p.vehicles,[id]:{...p.vehicles[id],[k]:v}}}));
   const setVI=(id:string,k:string,v:any)=>setF((p:any)=>({ ...p, vehicles:{...p.vehicles,[id]:{...p.vehicles[id],insumos:{...p.vehicles[id].insumos,[k]:v}}}}));
   const num=(v:any)=>Number(v);
-  return (<div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50 no-print">
-    <div className="bg-white rounded-xl ring-1 ring-slate-200 w-full max-w-5xl overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-2 bg-slate-50"><div className="font-medium">Configuración</div><button onClick={onClose}>✕</button></div>
-      <div className="p-4 grid md:grid-cols-2 gap-4 text-sm">
-        <div className="border rounded-xl p-3">
-          <div className="font-medium mb-2">Global</div>
-          <Grid>
-            <L label="Precio galón EC" v={f.precioGalonEC} set={(v:any)=>set("precioGalonEC",num(v))}/>
-            <L label="Precio galón PE" v={f.precioGalonPE} set={(v:any)=>set("precioGalonPE",num(v))}/>
-            <L label="Tasa anual" v={f.tasaAnual} set={(v:any)=>set("tasaAnual",num(v))}/>
-            <L label="Vida útil (km)" v={f.vidaUtilKm} set={(v:any)=>set("vidaUtilKm",num(v))}/>
-            <L label="Factor depreciación" v={f.factorDepreciacion} set={(v:any)=>set("factorDepreciacion",num(v))}/>
-            <L label="Conductor (USD/día)" v={f.costoConductorDia} set={(v:any)=>set("costoConductorDia",num(v))}/>
-            <L label="Administrativo (USD/día)" v={f.costoAdminFijoDia} set={(v:any)=>set("costoAdminFijoDia",num(v))}/>
-            <L label="Viático EC (USD/día)" v={f.viaticoEC} set={(v:any)=>set("viaticoEC",num(v))}/>
-            <L label="Viático PE (USD/día)" v={f.viaticoPE} set={(v:any)=>set("viaticoPE",num(v))}/>
-            <PercentField label="Margen interno/logisbur (%)" value={Math.round(f.margenInternoDefault*100)} onChange={(pct:number)=>set("margenInternoDefault",Math.max(0,Math.min(95,Number(pct)))/100)} />
-            <PercentField label="Margen comercial (%)" value={Math.round(f.margenComercialDefault*100)} onChange={(pct:number)=>set("margenComercialDefault",Math.max(0,Math.min(95,Number(pct)))/100)} />
-            <L label="Buffer pre-frontera (km)" v={f.bufferPreFronteraKm} set={(v:any)=>set("bufferPreFronteraKm",num(v))}/>
-            <L label="Cruce frontera (USD)" v={f.cruceFronteraUSD} set={(v:any)=>set("cruceFronteraUSD",num(v))}/>
-          </Grid>
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50 no-print">
+      <div className="bg-white rounded-xl ring-1 ring-slate-200 w-full max-w-5xl overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-2 bg-slate-50">
+          <div className="font-medium">Configuración</div>
+          <button onClick={onClose}>✕</button>
         </div>
-        <div className="border rounded-xl p-3 md:col-span-1">
-          <div className="font-medium mb-2">Vehículos</div>
-          <div className="grid md:grid-cols-3 gap-3">
-            {Object.keys(f.vehicles).map((id:string)=>{
-              const v=f.vehicles[id]; const base=VEHICULOS.find(x=>x.id===id)?.nombre||id;
-              return (<div key={id} className="border rounded-lg p-2">
-                <div className="text-slate-700 text-sm mb-1">{base}</div>
-                <L label="Rend. km/gal" v={v.rendKmGal} set={(val:any)=>setV(id,"rendKmGal",num(val))}/>
-                <L label="Capacidad (gal)" v={v.capacidadGalDefault} set={(val:any)=>setV(id,"capacidadGalDefault",num(val))}/>
-                <L label="Base deprec." v={v.baseDepreciacionUSD} set={(val:any)=>setV(id,"baseDepreciacionUSD",num(val))}/>
-                <L label="Insumos llantas/km" v={v.insumos.llantasKm} set={(val:any)=>setVI(id,"llantasKm",num(val))}/>
-                <L label="Insumos aceite/km" v={v.insumos.aceiteMotorKm} set={(val:any)=>setVI(id,"aceiteMotorKm",num(val))}/>
-                <L label="Insumos corona/km" v={v.insumos.aceiteCoronaKm} set={(val:any)=>setVI(id,"aceiteCoronaKm",num(val))}/>
-                <L label="Insumos filtros/km" v={v.insumos.filtrosKm} set={(val:any)=>setVI(id,"filtrosKm",num(val))}/>
-              </div>);
-            })}
+        <div className="p-4 grid md:grid-cols-2 gap-4 text-sm">
+          <div className="border rounded-xl p-3">
+            <div className="font-medium mb-2">Global</div>
+            <Grid>
+              <L label="Precio galón EC" v={f.precioGalonEC} set={(v:any)=>set("precioGalonEC",num(v))}/>
+              <L label="Precio galón PE" v={f.precioGalonPE} set={(v:any)=>set("precioGalonPE",num(v))}/>
+              <L label="Tasa anual" v={f.tasaAnual} set={(v:any)=>set("tasaAnual",num(v))}/>
+              <L label="Vida útil (km)" v={f.vidaUtilKm} set={(v:any)=>set("vidaUtilKm",num(v))}/>
+              <L label="Factor depreciación" v={f.factorDepreciacion} set={(v:any)=>set("factorDepreciacion",num(v))}/>
+              <L label="Conductor (USD/día)" v={f.costoConductorDia} set={(v:any)=>set("costoConductorDia",num(v))}/>
+              <L label="Administrativo (USD/día)" v={f.costoAdminFijoDia} set={(v:any)=>set("costoAdminFijoDia",num(v))}/>
+              <L label="Viático EC (USD/día)" v={f.viaticoEC} set={(v:any)=>set("viaticoEC",num(v))}/>
+              <L label="Viático PE (USD/día)" v={f.viaticoPE} set={(v:any)=>set("viaticoPE",num(v))}/>
+              <PercentField label="Margen interno/logisbur (%)" value={Math.round(f.margenInternoDefault*100)} onChange={(pct:number)=>set("margenInternoDefault",Math.max(0,Math.min(95,Number(pct)))/100)} />
+              <PercentField label="Margen comercial (%)" value={Math.round(f.margenComercialDefault*100)} onChange={(pct:number)=>set("margenComercialDefault",Math.max(0,Math.min(95,Number(pct)))/100)} />
+              <L label="Buffer pre-frontera (km)" v={f.bufferPreFronteraKm} set={(v:any)=>set("bufferPreFronteraKm",num(v))}/>
+              <L label="Cruce frontera (USD)" v={f.cruceFronteraUSD} set={(v:any)=>set("cruceFronteraUSD",num(v))}/>
+            </Grid>
+          </div>
+          <div className="border rounded-xl p-3 md:col-span-1">
+            <div className="font-medium mb-2">Vehículos</div>
+            <div className="grid md:grid-cols-3 gap-3">
+              {Object.keys(f.vehicles).map((id:string)=>{
+                const v=f.vehicles[id]; const base=VEHICULOS.find(x=>x.id===id)?.nombre||id;
+                return (
+                  <div key={id} className="border rounded-lg p-2">
+                    <div className="text-slate-700 text-sm mb-1">{base}</div>
+                    <L label="Rend. km/gal" v={v.rendKmGal} set={(val:any)=>setV(id,"rendKmGal",num(val))}/>
+                    <L label="Capacidad (gal)" v={v.capacidadGalDefault} set={(val:any)=>setV(id,"capacidadGalDefault",num(val))}/>
+                    <L label="Base deprec." v={v.baseDepreciacionUSD} set={(val:any)=>setV(id,"baseDepreciacionUSD",num(val))}/>
+                    <L label="Insumos llantas/km" v={v.insumos.llantasKm} set={(val:any)=>setVI(id,"llantasKm",num(val))}/>
+                    <L label="Insumos aceite/km" v={v.insumos.aceiteMotorKm} set={(val:any)=>setVI(id,"aceiteMotorKm",num(val))}/>
+                    <L label="Insumos corona/km" v={v.insumos.aceiteCoronaKm} set={(val:any)=>setVI(id,"aceiteCoronaKm",num(val))}/>
+                    <L label="Insumos filtros/km" v={v.insumos.filtrosKm} set={(val:any)=>setVI(id,"filtrosKm",num(val))}/>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
-      </div>
-      <div className="flex justify-end gap-2 px-4 py-2 bg-slate-50 no-print">
-        <button className="px-3 py-2 rounded-lg ring-1 ring-slate-200" onClick={onClose}>Cancelar</button>
-        <button className="px-3 py-2 rounded-lg bg-emerald-600 text-white" onClick={()=>{onSave(f); onClose();}}>Guardar</button>
+        <div className="flex justify-end gap-2 px-4 py-2 bg-slate-50 no-print">
+          <button className="px-3 py-2 rounded-lg ring-1 ring-slate-200" onClick={onClose}>Cancelar</button>
+          <button className="px-3 py-2 rounded-lg bg-emerald-600 text-white" onClick={()=>{onSave(f); onClose();}}>Guardar</button>
+        </div>
       </div>
     </div>
-  </div>);
+  );
 }
 const Grid=({children}:{children:any})=><div className="grid grid-cols-2 gap-2">{children}</div>;
 const L=({label,v,set}:{label:string,v:any,set:any})=>(<div><div className="text-xs text-slate-500">{label}</div><input className="w-full border rounded-lg px-3 py-2" value={v} onChange={e=>set(e.target.value)}/></div>);
@@ -576,7 +894,7 @@ const PercentField=({label,value,onChange}:{label:string,value:number,onChange:(
   </div>
 );
 
-/* Reporte: se eliminó la auto-invocación interna que rompía la compilación */
+/* Reporte (placeholder, no se usa directamente) */
 function Reporte({
   modo, cliente, rutaNombre, origen, destino, km,
   dias, credito, peajesUSD, tn, por, res, cfg, vehNombre
@@ -591,7 +909,7 @@ function Reporte({
   return (
     <div className="only-print">
       <div className="report-card p-6 rounded-2xl">
-        {/* ... tu contenido de Reporte igual que antes ... */}
+        {/* contenido de reporte */}
       </div>
     </div>
   );
