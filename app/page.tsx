@@ -65,10 +65,12 @@ type CostItem = {
   unitLabel?:string;
   /** Si es un valor fijo, usar unitUSD o valuesByOp. Si depende de FOB/CIF, dejar unitUSD = undefined y usar calc */
   unitUSD?:number;
-  valuesByOp?: FixedValsByOp; // para tener distintos valores en importación/exportación
+  valuesByOp?: Partial<Record<OperationType, number>>;
+  /** Limitar a ciertos tipos de operación */
+  ops?: OperationType[];
   /** Si requiere cálculo con FOB/CIF. Devuelve null si no hay datos suficientes (para mostrar fórmula). */
   calc?:(ctx:FOBCtx)=>number|null;
-  formulaHint?:string; // texto a mostrar cuando no hay FOB
+  formulaHint?:string;
 };
 
 type FOBCtx = {
@@ -97,48 +99,94 @@ const FOB_DEFAULTS: FOBCtx = {
   minSeguro:65
 };
 
-/** Catálogo maestro (mismos ítems para import/export; puedes ajustar valores por operación en valuesByOp) */
+
 const COSTS_MASTER: CostItem[] = [
-  { id: "agencia-pe", label: "Agencia Perú", valuesByOp: { importacion:120, exportacion:120 }, unitLabel:"servicio" },
-  // Bodega Perú: 0,30% FOB + 18% IGV (mín. 65)
+  /* ============ IMPORTACIÓN ============ */
+  { id: "agencia-pe", label: "Agencia Perú", valuesByOp: { importacion:120 }, unitLabel:"servicio", ops:["importacion"] },
+
+  // Bodega Perú (Import.): 0,30% FOB + 18% IGV (mín. 65)
   {
-    id: "bodega-pe",
+    id: "bodega-pe-imp",
     label: "Bodega Perú",
     unitLabel: "0,30% FOB + 18% IGV (mín. 65)",
+    ops:["importacion"],
     calc: (ctx) => {
       if (!ctx.fob || ctx.fob<=0) return null;
-      const base = Math.max(ctx.minBodega, ctx.fob * ctx.bodePEPct);
+      const base = Math.max(ctx.minBodega, ctx.fob * 0.003); // 0.30% FOB
       return base * (1 + ctx.igvPct);
     },
     formulaHint: "0,30% FOB × (1+IGV) (mín. 65)"
   },
-  { id: "agencia-ec", label: "Agencia Ecuador (incluye IVA)", valuesByOp: { importacion:265, exportacion:265 }, unitLabel:"servicio" },
-  // Bodega Ecuador: 0,35% CIF + $40 base + 15% IVA (mín. 65)
+
+  { id: "agencia-ec-imp", label: "Agencia Ecuador (incluye IVA)", valuesByOp: { importacion:265 }, unitLabel:"servicio", ops:["importacion"] },
+
+  // Bodega Ecuador (Import.): 0,35% CIF + $40 Base + $10 Báscula + 15% IVA (mín. 65)
   {
-    id: "bodega-ec",
+    id: "bodega-ec-imp",
     label: "Bodega Ecuador",
-    unitLabel: "0,35% CIF + $40 + 15% IVA (mín. 65)",
+    unitLabel: "0,35% CIF + $40 Base + $10 Báscula + 15% IVA (mín. 65)",
+    ops:["importacion"],
     calc: (ctx) => {
       if (!ctx.fob || ctx.fob<=0) return null;
-      const seguro = Math.max(ctx.minSeguro, ctx.fob * ctx.seguroPct);
+      const seguro = Math.max(ctx.minSeguro, ctx.fob * 0.003);           // 0.30% FOB
       const cif = ctx.fob + (ctx.fleteCIF || 0) + seguro;
-      const base = Math.max(ctx.minBodega, cif * ctx.bodeECPct + ctx.bodeECBase);
-      return base * (1 + ctx.ivaECPct);
+      const baseAntesIVA = Math.max(ctx.minBodega, (cif * 0.0035) + 40 + 10); // +$10 báscula
+      return baseAntesIVA * (1 + ctx.ivaECPct);                         // +15% IVA
     },
-    formulaHint: "0,35% CIF + 40, luego × (1+IVA) (mín. 65)"
+    formulaHint: "0,35% CIF + 40 + 10, luego × (1+IVA) (mín. 65)"
   },
-  // Seguro de carga: 0,30% FOB (mín. 65)
+
+  // Seguro (Import.): 0,30% FOB (mín. 65)
   {
-    id: "seguro",
-    label: "Seguro de carga",
+    id: "seguro-imp",
+    label: "Seguro de la carga",
     unitLabel: "0,30% FOB (mín. 65)",
+    ops:["importacion"],
     calc: (ctx) => {
       if (!ctx.fob || ctx.fob<=0) return null;
-      return Math.max(ctx.minSeguro, ctx.fob * ctx.seguroPct);
+      return Math.max(ctx.minSeguro, ctx.fob * 0.003);
     },
     formulaHint: "0,30% FOB (mín. 65)"
   },
+
+  /* ============ EXPORTACIÓN ============ */
+  { id: "ag-adu-ec-exp", label: "Ag. Aduana Ecuador", valuesByOp: { exportacion:125 }, unitLabel:"x trámite", ops:["exportacion"] },
+
+  { id: "bodega-ec-exp", label: "Bodega Ecuador", valuesByOp: { exportacion:26 }, unitLabel:"x unidad", ops:["exportacion"] },
+
+  { id: "ag-adu-pe-exp", label: "Ag. Aduana Perú", valuesByOp: { exportacion:150 }, unitLabel:"x trámite", ops:["exportacion"] },
+
+  // Bodega Perú (Export.): 0,30% CIF + 18% IGV (sin mínimo)
+  {
+    id: "bodega-pe-exp",
+    label: "Bodega Perú",
+    unitLabel: "0,30% CIF + 18% IGV",
+    ops:["exportacion"],
+    calc: (ctx) => {
+      if (!ctx.fob || ctx.fob<=0) return null;
+      // Para CIF en export asumimos seguro al 0,40% FOB (según cuadro)
+      const seguroExp = Math.max(ctx.minSeguro, ctx.fob * 0.004); // 0.40%
+      const cif = ctx.fob + (ctx.fleteCIF || 0) + seguroExp;
+      const base = cif * 0.003; // 0.30% CIF
+      return base * (1 + ctx.igvPct); // +18% IGV
+    },
+    formulaHint: "0,30% CIF × (1+IGV)"
+  },
+
+  // Seguro (Export.): 0,40% FOB (mín. 65)
+  {
+    id: "seguro-exp",
+    label: "Seguro de la carga",
+    unitLabel: "0,40% FOB (mín. 65)",
+    ops:["exportacion"],
+    calc: (ctx) => {
+      if (!ctx.fob || ctx.fob<=0) return null;
+      return Math.max(ctx.minSeguro, ctx.fob * 0.004);
+    },
+    formulaHint: "0,40% FOB (mín. 65)"
+  },
 ];
+
 
 /** Catálogo para Tránsito (sin cambios funcionales) */
 const COSTS_TRANSIT: CostItem[] = [
@@ -154,31 +202,32 @@ const COSTS_TRANSIT: CostItem[] = [
 ];
 
 /** Genera catálogo por operación (import/export comparten ítems pero con distintos unitUSD fijos cuando aplique) */
-const getCatalog=(op:OperationType, fobCtx:FOBCtx): CostItem[]=>
-  op==="transito"
+/** Genera catálogo por operación (import/export con ítems exclusivos) */
+const getCatalog = (op: OperationType, fobCtx: FOBCtx): CostItem[] =>
+  op === "transito"
     ? COSTS_TRANSIT
-    : COSTS_MASTER.map(ci=>{
-        // clonar
-        const out: CostItem = {...ci};
-        // Si tiene valores fijos por operación, resolverlos
-        if (ci.valuesByOp && typeof ci.valuesByOp[op] === "number") {
-          out.unitUSD = ci.valuesByOp[op]!;
-        } else {
-          // Mantener unitUSD si vino fijo en el maestro
-          if (typeof ci.unitUSD === "number") out.unitUSD = ci.unitUSD;
-          else out.unitUSD = undefined; // la calculará calc (si existe) o mostrará fórmula
-        }
-        // Si hay calc (depende de FOB/CIF), calcular ahora
-        if (ci.calc) {
-          const val = ci.calc(fobCtx);
-          if (val===null) {
-            out.unitUSD = NaN; // marcar como "sin valor" (mostrar fórmula / no sumar)
+    : COSTS_MASTER
+        .filter(ci => !ci.ops || ci.ops.includes(op))           // <— filtro por operación
+        .map(ci => {
+          const out: CostItem = { ...ci };
+
+          // Resolver unitUSD fijo por operación si aplica
+          if (ci.valuesByOp && typeof ci.valuesByOp[op] === "number") {
+            out.unitUSD = ci.valuesByOp[op]!;
+          } else if (typeof ci.unitUSD === "number") {
+            out.unitUSD = ci.unitUSD;
           } else {
-            out.unitUSD = Number(val.toFixed(2));
+            out.unitUSD = undefined;
           }
-        }
-        return out;
-      });
+
+          // Calcular si hay fórmula (FOB/CIF)
+          if (ci.calc) {
+            const val = ci.calc(fobCtx);
+            out.unitUSD = (val === null) ? NaN : Number(val.toFixed(2));
+          }
+
+          return out;
+        });
 
 const money=(n:number)=>`$ ${Number(n||0).toFixed(2)}`;
 const r5=(n:number)=>Math.ceil(n/5)*5;
@@ -262,7 +311,7 @@ export default function Page(){
     seguroPct: Math.max(0, Number(seguroPct||0))/100
   }),[fobUSD,fleteCIFUSD,seguroPct]);
 
-  type SelectedCost = (CostItem);
+  type SelectedCost = CostItem & { manual?: boolean };
   const catalogo = useMemo(()=>getCatalog(operacion, fobCtx),[operacion,fobCtx]);
 
   const [costosSel,setCostosSel]=useState<SelectedCost[]>([]);
@@ -272,18 +321,42 @@ export default function Page(){
     if(i>=0) return prev.filter((_,idx)=>idx!==i);
     // tomar valor actual del catálogo (con cálculo hecho)
     const curr = catalogo.find(c=>c.id===it.id);
-    return [...prev,{...(curr||it)}];
+    return [...prev,{...(curr||it), manual:false}];
   });
+  const setCostoValue = (id:string, val:string) => {
+  const n = val === "" ? NaN : Number(val);
+  setCostosSel(prev => prev.map(c => c.id===id ? ({ ...c, unitUSD: n, manual:true }) : c));
+  };
+  const setCostoLabel = (id:string, text:string) =>
+    setCostosSel(prev => prev.map(c => c.id===id ? ({ ...c, label:text, manual:true }) : c));
+  const setCostoUnitLabel = (id:string, text:string) =>
+    setCostosSel(prev => prev.map(c => c.id===id ? ({ ...c, unitLabel:text, manual:true }) : c));
+
   const removeCosto=(id:string)=>setCostosSel(prev=>prev.filter(c=>c.id!==id));
   const clearCostos=()=>setCostosSel([]);
 
   // Re-sincronizar valores calculados cuando cambie FOB/flete/%
   useEffect(()=>{
-    setCostosSel(prev => prev.map(sel=>{
-      const cat = catalogo.find(c=>c.id===sel.id);
-      return cat ? {...sel, unitUSD: cat.unitUSD} : sel;
+  setCostosSel(prev => prev.map(sel=>{
+    const cat = catalogo.find(c=>c.id===sel.id);
+      if (!cat) return sel;
+      // Si el usuario editó (manual), NO tocamos sus campos
+      if (sel.manual) return sel;
+      // Si no es manual, actualizamos desde el catálogo (incluye fórmulas con FOB)
+      return { ...sel, label: cat.label, unitLabel: cat.unitLabel, unitUSD: cat.unitUSD };
     }));
   },[catalogo]);
+
+
+  // Ajustar seguro automáticamente según operación
+  useEffect(() => {
+    if (operacion === "importacion") {
+      setSeguroPct(0.30); // 0.30%
+    } else if (operacion === "exportacion") {
+      setSeguroPct(0.40); // 0.40%
+    }
+  }, [operacion]);
+
 
   const totalCostosAdic=useMemo(()=>costosSel.reduce((s,c)=>{
     const u = Number(c.unitUSD);
@@ -526,13 +599,57 @@ export default function Page(){
                         </label>
                         {item.unitLabel && <div className="text-[11px] text-slate-500 ml-6">({item.unitLabel})</div>}
                         {checked && (
-                          <div className="flex items-center gap-2 ml-6 mt-1">
-                             <b>Línea:</b>{" "}
+                        <div className="ml-6 mt-2 space-y-2">
+                          {/* Descripción */}
+                          <div>
+                            <div className="text-[11px] text-slate-500 mb-1">Descripción</div>
+                            <input
+                              type="text"
+                              className="w-full border rounded-md px-2 py-1 text-sm"
+                              value={sel?.label ?? ""}
+                              onChange={(e)=>setCostoLabel(item.id, e.target.value)}
+                            />
+                          </div>
+
+                          {/* Unidad / Nota  +  Valor (USD) */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div>
+                              <div className="text-[11px] text-slate-500 mb-1">Unidad / nota</div>
+                              <input
+                                type="text"
+                                className="w-full border rounded-md px-2 py-1 text-sm"
+                                value={sel?.unitLabel ?? ""}
+                                onChange={(e)=>setCostoUnitLabel(item.id, e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <div className="text-[11px] text-slate-500 mb-1">Valor (USD)</div>
+                              <input
+                                type="number"
+                                step="0.01"
+                                className="w-full border rounded-md px-2 py-1 text-sm tabular-nums"
+                                // si no es número (NaN), mostramos vacío (para “usar fórmula” si existe)
+                                value={isFinite(Number(sel?.unitUSD)) ? String(sel?.unitUSD) : ""}
+                                placeholder={isFinite(Number(item.unitUSD)) ? String(item.unitUSD) : ""}
+                                onChange={(e)=>setCostoValue(item.id, e.target.value)}
+                              />
+                              {!isFinite(Number(sel?.unitUSD)) && (item.formulaHint || item.unitLabel) && (
+                                <div className="text-[11px] text-slate-500 italic mt-1">
+                                  (Vacío = usar fórmula: {item.formulaHint || item.unitLabel})
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Línea calculada/ingresada */}
+                          <div className="text-xs">
+                            <b>Línea:</b>{" "}
                             {isFinite(Number(sel?.unitUSD))
                               ? <span>{money(Number(sel?.unitUSD||0))}</span>
                               : <span className="text-slate-500 italic">{item.formulaHint || item.unitLabel || "fórmula"}</span>}
                           </div>
-                        )}
+                        </div>
+                      )}
                       </div>
                     );
                   })}
