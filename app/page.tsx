@@ -111,12 +111,14 @@ const COSTS_MASTER: CostItem[] = [
   {
     id: "bodega-pe-imp",
     label: "Bodega Perú",
-    unitLabel: "",
+    unitLabel: "0,30% FOB + 18% IGV (mín. 65)",
     ops:["importacion"],
     calc: (ctx) => {
       if (!ctx.fob || ctx.fob<=0) return null;
-      const base = Math.max(ctx.minBodega, ctx.fob * 0.003); // 0.30% FOB
-      return base * (1 + ctx.igvPct);
+      const fob = ctx.fob * ctx.bodePEPct; // 0.30% FOB
+      const base = fob + (fob * ctx.igvPct); // +18% IGV
+      const total = Math.max(ctx.minBodega, base);
+      return total;
     },
     formulaHint: "0,30% FOB × (1+IGV) (mín. 65)"
   },
@@ -127,14 +129,15 @@ const COSTS_MASTER: CostItem[] = [
   {
     id: "bodega-ec-imp",
     label: "Bodega Ecuador",
-    unitLabel: "",
+    unitLabel: "0,35% CIF + $40 Base + $10 Báscula + 15% IVA (mín. 65)",
     ops:["importacion"],
     calc: (ctx) => {
-      if (!ctx.fob || ctx.fob<=0) return null;
-      const seguro = Math.max(ctx.minSeguro, ctx.fob * 0.003);           // 0.30% FOB
-      const cif = ctx.fob + (ctx.fleteCIF || 0) + seguro;
-      const baseAntesIVA = Math.max(ctx.minBodega, (cif * 0.0035) + 40 + 10); // +$10 báscula
-      return baseAntesIVA * (1 + ctx.ivaECPct);                         // +15% IVA
+      if (!ctx.fleteCIF || ctx.fleteCIF <=0) return null;
+      const cif = ctx.fleteCIF * ctx.bodeECPct; // CIF
+      const baseAntesIVA = cif + ctx.bodeECBase + 10;
+      const baseconIVA = baseAntesIVA + (baseAntesIVA * ctx.ivaECPct);
+      const total = Math.max(ctx.minBodega, baseconIVA);
+      return total;                         // +15% IVA
     },
     formulaHint: "0,35% CIF + 40 + 10, luego × (1+IVA) (mín. 65)"
   },
@@ -143,11 +146,11 @@ const COSTS_MASTER: CostItem[] = [
   {
     id: "seguro-imp",
     label: "Seguro de la carga",
-    unitLabel: "",
+    unitLabel: "0,30% FOB (mín. 65)",
     ops:["importacion"],
     calc: (ctx) => {
       if (!ctx.fob || ctx.fob<=0) return null;
-      return Math.max(ctx.minSeguro, ctx.fob * 0.003);
+      return Math.max(ctx.minSeguro, ctx.fob * ctx.seguroPct);
     },
     formulaHint: "0,30% FOB (mín. 65)"
   },
@@ -163,15 +166,13 @@ const COSTS_MASTER: CostItem[] = [
   {
     id: "bodega-pe-exp",
     label: "Bodega Perú",
-    unitLabel: "",
+    unitLabel: "0,30% CIF + 18% IGV",
     ops:["exportacion"],
     calc: (ctx) => {
-      if (!ctx.fob || ctx.fob<=0) return null;
-      // Para CIF en export asumimos seguro al 0,40% FOB (según cuadro)
-      const seguroExp = Math.max(ctx.minSeguro, ctx.fob * 0.004); // 0.40%
-      const cif = ctx.fob + (ctx.fleteCIF || 0) + seguroExp;
-      const base = cif * 0.003; // 0.30% CIF
-      return base * (1 + ctx.igvPct); // +18% IGV
+      if (!ctx.fleteCIF || ctx.fleteCIF<=0) return null;
+      const cif = ctx.fleteCIF * ctx.bodePEPct; // 0.30% CIF
+      const base = cif + (cif * ctx.igvPct); // +18% IGV
+      return base; // +18% IGV
     },
     formulaHint: "0,30% CIF × (1+IGV)"
   },
@@ -180,11 +181,11 @@ const COSTS_MASTER: CostItem[] = [
   {
     id: "seguro-exp",
     label: "Seguro de la carga",
-    unitLabel: "",
+    unitLabel: "0,40% FOB (mín. 65)",
     ops:["exportacion"],
     calc: (ctx) => {
       if (!ctx.fob || ctx.fob<=0) return null;
-      return Math.max(ctx.minSeguro, ctx.fob * 0.004);
+      return Math.max(ctx.minSeguro, ctx.fob * ctx.seguroPct);
     },
     formulaHint: "0,40% FOB (mín. 65)"
   },
@@ -298,6 +299,7 @@ export default function Page(){
   const [cruceOn,setCruceOn]=useState(false);
 
   const [observaciones, setObservaciones] = useState("");
+  const [manerapago, setManerapago] = useState("");
   const [pvpManual, setPvpManual] = useState<string>("");
 
 
@@ -425,6 +427,7 @@ export default function Page(){
       valorTransporte={pvpMostrado}
       costosSel={costosSel}
       observaciones={observaciones}
+      manerapago={manerapago}
       operacion={operacion}
       logoUrl={logoUrl}
     />
@@ -479,6 +482,7 @@ export default function Page(){
               valorTransporte={pvpMostrado}
               costosSel={costosSel}
               observaciones={observaciones}
+              manerapago={manerapago}
               operacion={operacion} // importacion / exportacion / transito
             />
               <button className="px-3 py-1.5 rounded-lg ring-1 ring-slate-200" onClick={()=>setOpenMapa(v=>!v)}>{openMapa ? "Ocultar mapa" : "Abrir mapa"}</button>
@@ -645,7 +649,7 @@ export default function Page(){
                     const sel=costosSel.find(c=>c.id===item.id);
                     const checked=!!sel;
                     const hasNumeric = isFinite(Number(item.unitUSD));
-                    const rightText = hasNumeric ? money(Number(item.unitUSD)) : (item.formulaHint || item.unitLabel || "—");
+                    const rightText = hasNumeric ? money(Number(item.unitUSD)) : (item.formulaHint || item.unitLabel );
                     return (
                       <div key={item.id} className="rounded-lg border px-2 py-2 text-sm">
                         <label className="flex items-center justify-between">
@@ -754,6 +758,15 @@ export default function Page(){
                     placeholder="Escribe observaciones, condiciones, notas internas…"
                     value={observaciones}
                     onChange={(e)=>setObservaciones(e.target.value)}
+                  />
+                </div>
+                <div className="mt-3">
+                  <div className="text-sm font-semibold mb-1">Forma de pago</div>
+                  <textarea
+                    className="w-full border rounded-lg px-3 py-2 text-sm min-h-[64px]"
+                    placeholder="Especifica la forma de pago acordada con el cliente…"
+                    value={manerapago}
+                    onChange={(e)=>setManerapago(e.target.value)}
                   />
                 </div>
               </div>
@@ -1080,6 +1093,7 @@ function Reporte({
   valorTransporte,
   costosSel,
   observaciones,
+  manerapago,
   operacion,
 }: {
   ciudad: string;
@@ -1091,6 +1105,7 @@ function Reporte({
   valorTransporte: number;
   costosSel: Array<{ id:string; label:string; unitUSD?:number; unitLabel?:string }>;
   observaciones: string;
+  manerapago: string;
   operacion: "importacion" | "exportacion" | "transito";
 }) {
   const hoy = new Date();
@@ -1100,7 +1115,7 @@ function Reporte({
   const listaAdic = costosSel.map(c=>{
     const isNum = isFinite(Number(c.unitUSD));
     const texto = isNum ? money(Number(c.unitUSD)) : (c.unitLabel || "—");
-    return `${c.label}${c.unitLabel?` (${c.unitLabel})`:""}: ${isNum ? texto : texto}`;
+    return `${c.label}${` (${c.unitLabel})`}: ${isNum ? texto : texto}`;
   });
 
   const tituloOp = operacion === "importacion"
@@ -1129,7 +1144,7 @@ function Reporte({
       <div className="h-1.5 w-full bg-orange-500 mb-4"></div>
 
       {/* Cuerpo */}
-      <p className="mb-4">Estimado,</p>
+      <p className="mb-4">Estimado {cliente},</p>
       <p className="mb-4">
         Por medio de la presente, ponemos a su conocimiento los valores de logística solicitados:
       </p>
@@ -1162,7 +1177,11 @@ function Reporte({
         {observaciones || "—"}
       </div>
 
-      <div className="mt-4 font-semibold">Condición de pago:</div>
+      <div className="mb-4">
+        <span className="font-semibold">Forma de pago:</span>
+        <span>{manerapago}</span>
+      </div>
+
       <div className="border rounded-md p-3 mt-1">
         <div className="mb-2"><b>Plazo:</b> {cliente ? "Por confirmar con " + cliente : "Por confirmar"}</div>
         <div className="mb-2"><b>El pago se debe realizar</b> a través de depósito o transferencia a:</div>

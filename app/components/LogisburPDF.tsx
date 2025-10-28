@@ -26,11 +26,11 @@ const money = (n:number)=>`$ ${Number(n||0).toFixed(2)}`;
 export default function LogisburPDF({
   ciudad, cliente, producto, unidadCarga,
   origen, destino, valorTransporte,
-  costosSel, observaciones, operacion, logoUrl
+  costosSel, observaciones,manerapago, operacion, logoUrl
 }: {
   ciudad: string; cliente: string; producto: string; unidadCarga: string;
   origen: string; destino: string; valorTransporte: number;
-  costosSel: Sel[]; observaciones: string; operacion: OperationType;
+  costosSel: Sel[]; observaciones: string; manerapago: string; operacion: OperationType;
   logoUrl?: string;
 }) {
   const hoy = new Date();
@@ -95,10 +95,10 @@ export default function LogisburPDF({
             <View style={styles.ul}>
               {costosSel.map((c, i) => {
                 const isNum = isFinite(Number(c.unitUSD));
-                const val = isNum ? money(Number(c.unitUSD)) : (c.unitLabel || "—");
+                const val = isNum ? money(Number(c.unitUSD)) : (c.unitLabel);
                 return (
                   <Text key={c.id || String(i)} style={styles.li}>
-                    • {c.label}{c.unitLabel?` (${c.unitLabel})`:""}: {val}
+                    • {c.label}{` (${c.unitLabel})`}: {val}
                   </Text>
                 );
               })}
@@ -111,7 +111,10 @@ export default function LogisburPDF({
           <Text>{observaciones || "—"}</Text>
         </View>
 
-        <Text style={{ fontWeight: 700, marginBottom: 4 }}>Condición de pago:</Text>
+        <View style={styles.mb4}>
+          <Text style={styles.label}>Condición de pago:<Text>{manerapago}</Text></Text>
+        </View>
+
         <View style={styles.box}>
           {!!cliente && <Text style={styles.mb2}><Text style={styles.label}>Plazo:</Text> Por confirmar con {cliente}</Text>}
           <Text style={styles.mb2}>El pago se debe realizar a través de depósito o transferencia a:</Text>
