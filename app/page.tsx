@@ -120,7 +120,7 @@ const COSTS_MASTER: CostItem[] = [
       const total = Math.max(ctx.minBodega, base);
       return total;
     },
-    formulaHint: "0,30% FOB × (1+IGV) (mín. 65)"
+    formulaHint: "0,30% FOB + 18% IGV (mín. 65)"
   },
 
   { id: "agencia-ec-imp", label: "Agencia Ecuador (incluye IVA)", valuesByOp: { importacion:265 }, unitLabel:"servicio", ops:["importacion"] },
@@ -139,7 +139,7 @@ const COSTS_MASTER: CostItem[] = [
       const total = Math.max(ctx.minBodega, baseconIVA);
       return total;                         // +15% IVA
     },
-    formulaHint: "0,35% CIF + 40 + 10, luego × (1+IVA) (mín. 65)"
+    formulaHint: "0,35% CIF + $40 Base + $10 Báscula + 15% IVA (mín. 65)"
   },
 
   // Seguro (Import.): 0,30% FOB (mín. 65)
@@ -162,7 +162,7 @@ const COSTS_MASTER: CostItem[] = [
 
   { id: "ag-adu-pe-exp", label: "Ag. Aduana Perú", valuesByOp: { exportacion:150 }, unitLabel:"x trámite", ops:["exportacion"] },
 
-  // Bodega Perú (Export.): 0,30% CIF + 18% IGV (sin mínimo)
+  // Bodega Perú (Export.): 0,30% CIF + 18% IGV
   {
     id: "bodega-pe-exp",
     label: "Bodega Perú",
@@ -172,9 +172,9 @@ const COSTS_MASTER: CostItem[] = [
       if (!ctx.fleteCIF || ctx.fleteCIF<=0) return null;
       const cif = ctx.fleteCIF * ctx.bodePEPct; // 0.30% CIF
       const base = cif + (cif * ctx.igvPct); // +18% IGV
-      return base; // +18% IGV
+      return base;
     },
-    formulaHint: "0,30% CIF × (1+IGV)"
+    formulaHint: "0,30% CIF + 18% IGV"
   },
 
   // Seguro (Export.): 0,40% FOB (mín. 65)
@@ -571,7 +571,7 @@ export default function Page(){
                   <div className="grid grid-cols-2 gap-2 mt-2">
                     <Num label="KM en Ecuador" v={kmEC} set={v=>setKmEC(Math.max(0,Number(v)))}/>
                     <Num label="KM en Perú" v={kmPE} set={v=>setKmPE(Math.max(0,Number(v)))}/>
-                    <div className="text-[11px] text-slate-500 col-span-2">Se usa pre-llenado EC (capacidad×precio EC) + EC por km; en Perú solo excedente sobre (capacidad×8 − {cfg.bufferPreFronteraKm} km).</div>
+                    <div className="text-[11px] text-slate-500 col-span-2">Se usa pre-llenado EC (capacidad×precio EC) + EC por km; en Perú por km - pre-llenado EC sobre (capacidad×8 − {cfg.bufferPreFronteraKm} km).</div>
                   </div>
                 )}
                 <label className="text-sm mt-3 flex items-center gap-2">
@@ -828,7 +828,7 @@ export default function Page(){
                             <>
                               <tr><Td>Prefill Ecuador ({res.cap} gal)</Td><Td>{money(cfg.precioGalonEC)}</Td><Td>{money(res.pref)}</Td></tr>
                               <tr><Td>Ecuador (por km)</Td><Td>{money(cfg.precioGalonEC)}</Td><Td>{money(res.cec)}</Td></tr>
-                              <tr><Td>Perú (excedente)</Td><Td>{money(cfg.precioGalonPE)}</Td><Td>{money(res.pexc)}</Td></tr>
+                              <tr><Td>Perú (por km)</Td><Td>{money(cfg.precioGalonPE)}</Td><Td>{money(res.pexc)}</Td></tr>
                             </>
                           ):(
                             <>
