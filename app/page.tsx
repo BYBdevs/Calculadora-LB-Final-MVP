@@ -659,7 +659,9 @@ export default function Page(){
                           </span>
                           <span className={`tabular-nums ${hasNumeric?"":"text-slate-500 italic"}`}>{rightText}</span>
                         </label>
-                        {item.unitLabel && <div className="text-[11px] text-slate-500 ml-6">({item.unitLabel})</div>}
+                        {hasNumeric && item.unitLabel && (
+                          <div className="text-[11px] text-slate-500 ml-6">({item.unitLabel})</div>
+                        )}
                         {checked && (
                         <div className="ml-6 mt-2 space-y-2">
                           {/* Descripción */}
@@ -866,7 +868,10 @@ export default function Page(){
                               const isNum = isFinite(Number(c.unitUSD));
                               return (
                                 <div key={c.id} className="flex items-center justify-between text-sm">
-                                  <span>{c.label}{c.unitLabel?` (${c.unitLabel})`:""}</span>
+                                  <span>
+                                    {c.label}
+                                    {isNum && c.unitLabel ? ` (${c.unitLabel})` : ""}
+                                  </span>
                                   {isNum
                                     ? <span className="tabular-nums"><b>{money(Number(c.unitUSD))}</b></span>
                                     : <span className="text-slate-500 italic">{(c.formulaHint||c.unitLabel||"fórmula")}</span>}
@@ -1112,11 +1117,15 @@ function Reporte({
   const fecha = hoy.toLocaleDateString("es-ES", {day: "numeric", month: "long", year: "numeric"});
   const hora  = hoy.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
 
-  const listaAdic = costosSel.map(c=>{
+  const listaAdic = costosSel.map(c => {
     const isNum = isFinite(Number(c.unitUSD));
+    const etiqueta = isNum
+      ? `${c.label}${c.unitLabel ? ` (${c.unitLabel})` : ""}`
+      : c.label;
     const texto = isNum ? money(Number(c.unitUSD)) : (c.unitLabel || "—");
-    return `${c.label}${` (${c.unitLabel})`}: ${isNum ? texto : texto}`;
+    return `${etiqueta}: ${texto}`;
   });
+
 
   const tituloOp = operacion === "importacion"
     ? "IMPORTACIÓN"

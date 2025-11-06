@@ -49,6 +49,8 @@ const styles = StyleSheet.create({
 });
 
 const money = (n: number) => `$ ${Number(n || 0).toFixed(2)}`;
+const isNum = (v: unknown) => Number.isFinite(Number(v));
+
 
 export default function LogisburPDF({
   ciudad, cliente, producto, unidadCarga,
@@ -137,13 +139,23 @@ export default function LogisburPDF({
         <View style={[styles.box, styles.mb4]}>
           {costosSel && costosSel.length > 0 ? (
             <View style={styles.ul}>
-              {costosSel.map((c, i) => {
-                const isNum = isFinite(Number(c.unitUSD));
-                const val = isNum ? money(Number(c.unitUSD)) : (c.unitLabel || "—");
+              {costosSel.map((c) => {
+                const numeric = isNum(c.unitUSD);
+                // Si hay número, mostramos (unitLabel) al lado del nombre; si no, NO.
+                const etiqueta = numeric
+                  ? `${c.label}${c.unitLabel ? ` (${c.unitLabel})` : ""}`
+                  : c.label;
+
+                // Si hay número, el valor es dinero; si no, el valor es la fórmula (unitLabel) una sola vez.
+                const valor = numeric
+                  ? money(Number(c.unitUSD))
+                  : (c.unitLabel || "—");
+
                 return (
-                  <Text key={c.id || String(i)} style={styles.li}>
-                    • {c.label}{c.unitLabel ? ` (${c.unitLabel})` : ""}: {val}
-                  </Text>
+                  <View key={c.id} style={styles.row}>
+                    <Text style={{ flex: 1 }}>{etiqueta}</Text>
+                    <Text style={{ width: 120, textAlign: "right" }}>{valor}</Text>
+                  </View>
                 );
               })}
             </View>
