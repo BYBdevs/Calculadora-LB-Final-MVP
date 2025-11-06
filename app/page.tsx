@@ -1109,7 +1109,7 @@ function Reporte({
   operacion: "importacion" | "exportacion" | "transito";
 }) {
   const hoy = new Date();
-  const fecha = hoy.toLocaleDateString();
+  const fecha = hoy.toLocaleDateString("es-ES", {day: "numeric", month: "long", year: "numeric"});
   const hora  = hoy.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
 
   const listaAdic = costosSel.map(c=>{
@@ -1131,7 +1131,6 @@ function Reporte({
         <div className="flex items-center gap-3">
           <img src="/logo.png" alt="LOGISBUR" width={64} height={64}/>
           <div>
-            <div className="text-2xl font-extrabold tracking-wide">LOGISBUR</div>
             <div className="text-[11px] text-slate-500">www.logisbur.com.ec</div>
           </div>
         </div>
@@ -1150,10 +1149,10 @@ function Reporte({
       </p>
 
       <div className="grid grid-cols-2 gap-3 mb-3">
-        <div><span className="font-semibold">Producto:</span><br/>{producto || "—"}</div>
-        <div><span className="font-semibold">Unidad de Carga:</span><br/>{unidadCarga || "—"}</div>
-        <div><span className="font-semibold">Origen:</span><br/>{origen || "—"}</div>
-        <div><span className="font-semibold">Destino:</span><br/>{destino || "—"}</div>
+        <div><span className="font-semibold">Producto:</span><br/>{producto || ""}</div>
+        <div><span className="font-semibold">Unidad de Carga:</span><br/>{unidadCarga || ""}</div>
+        <div><span className="font-semibold">Origen:</span><br/>{origen || ""}</div>
+        <div><span className="font-semibold">Destino:</span><br/>{destino || ""}</div>
       </div>
 
       <div className="mb-4">

@@ -1,8 +1,10 @@
+/* app/components/RoutePlanner.tsx */
 "use client";
 
 import { useEffect, useRef, useState } from "react";
 import Script from "next/script";
 
+/* ===== Tipos ===== */
 type Toll = { name: string; lat: number; lng: number; cost: number; radiusMeters?: number };
 
 type Props = {
@@ -20,9 +22,16 @@ type Props = {
   }) => void;
   showTollsEditor?: boolean;
   onBorderCrossing?: (crossed: boolean) => void;
-  onCountryKm?: (data: { RL: boolean; kmEC: number; kmPE: number}) => void;
+  onCountryKm?: (data: { RL: boolean; kmEC: number; kmPE: number }) => void;
 };
 
+declare global {
+  interface Window {
+    initMap: () => void;
+  }
+}
+
+/* ===== Catálogo por defecto ===== */
 const DEFAULT_TOLLS: Toll[] = [
   { name: "PINTAG", lat: -0.3162990164, lng: -78.3679148792, cost: 12.0 },
   { name: "CADENA", lat: -1.7785029485, lng: -80.2946557717, cost: 12.0 },
@@ -59,54 +68,123 @@ const DEFAULT_TOLLS: Toll[] = [
   { name: "MONTERRICO", lat: -12.0676160806, lng: -76.971702123, cost: 22.62 },
   { name: "JAHUAY", lat: -13.3870450224, lng: -76.2018885707, cost: 66.52 },
   { name: "TAMBOGRANDE", lat: -4.9345321799, lng: -80.5468530932, cost: 18.03 },
-  {name:"DURAN/TAMBO",lat: -2.219504243, lng: -79.77147501, cost: 12.0},
+  { name: "DURAN/TAMBO", lat: -2.219504243, lng: -79.77147501, cost: 12.0 },
 ];
 
-declare global {
-  interface Window {
-    initMap: () => void;
-  }
-}
-
 export default function RoutePlanner(props: Props) {
+  /* ===== Refs de DOM ===== */
   const mapRef = useRef<HTMLDivElement | null>(null);
   const originRef = useRef<HTMLInputElement | null>(null);
   const destRef = useRef<HTMLInputElement | null>(null);
   const waypointsContainerRef = useRef<HTMLDivElement | null>(null);
   const tollsTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const thresholdRef = useRef<HTMLInputElement | null>(null);
-  const showEditor = props.showTollsEditor ?? false;
   const leftPanelRef = useRef<HTMLDivElement | null>(null);
   const summaryRef = useRef<HTMLDivElement | null>(null);
-  const HUAQUILLAS = { lat: -3.4819, lng: -80.2141 };
-  const HUAQUILLAS_RADIUS_M = 2000; // 4 km aprox, ajusta si necesitas
 
-
+  /* ===== Estado/UI ===== */
+  const showEditor = props.showTollsEditor ?? false;
   const [ready, setReady] = useState(false);
   const [distanceKm, setDistanceKm] = useState<string>("—");
   const [tollCount, setTollCount] = useState<number>(0);
   const [tollTotal, setTollTotal] = useState<string>("—");
   const [tollList, setTollList] = useState<Toll[]>([]);
-
   const [mapObj, setMapObj] = useState<google.maps.Map | null>(null);
   const [renderer, setRenderer] = useState<google.maps.DirectionsRenderer | null>(null);
   const [service, setService] = useState<google.maps.DirectionsService | null>(null);
   const [autoCompletes, setAutoCompletes] = useState<google.maps.places.Autocomplete[]>([]);
+  const acMapRef = useRef<Map<HTMLInputElement, google.maps.places.Autocomplete>>(new Map());
+
+  // Solo para mostrar en UI si quieres; la limpieza real usa ref:
   const [tollMarkers, setTollMarkers] = useState<google.maps.Marker[]>([]);
+
+  /* ===== Refs de estado persistente ===== */
+  const lastCenterRef = useRef<google.maps.LatLngLiteral | null>(null);
+  const lastZoomRef = useRef<number | null>(null);
+  const lastDirectionsRef = useRef<google.maps.DirectionsResult | null>(null);
+  const tollMarkersRef = useRef<google.maps.Marker[]>([]);
+  const serviceRef = useRef<google.maps.DirectionsService | null>(null);
+  const isRecreatingRef = useRef(false);
+
+  /* ===== Otros ===== */
   const [currentTolls, setCurrentTolls] = useState<Toll[]>(props.tollsCatalog || DEFAULT_TOLLS);
   const [waypointInputs, setWaypointInputs] = useState<HTMLInputElement[]>([]);
-  
-
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
-  // Pinta los peajes en el textarea (editable)
-  useEffect(() => {
-    if (showEditor && tollsTextareaRef.current) {
-      tollsTextareaRef.current.value = JSON.stringify(DEFAULT_TOLLS, null, 2);
-    }
-  }, []);
+  const HUAQUILLAS = { lat: -3.4819, lng: -80.2141 };
+  const HUAQUILLAS_RADIUS_M = 2000;
 
-  // Init map when script loads
+  /* ===== Helpers de repintado ===== */
+  const hasCanvas = () => !!mapRef.current?.querySelector("canvas");
+
+  function safeResize() {
+    if (!mapObj) return;
+    // @ts-ignore
+    google.maps.event.trigger(mapObj, "resize");
+    const c = mapObj.getCenter();
+    const z = mapObj.getZoom();
+    if (c && typeof z === "number") {
+      mapObj.setZoom(z);
+      mapObj.setCenter(c);
+    }
+    // Evitar llamar renderer.setMap en cada resize para no parpadear
+  }
+
+  function recreateMap(reason: "pageshow" | "visibilitychange" | "visible") {
+    const host = mapRef.current;
+    if (!host) return;
+
+    const rect = host.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      requestAnimationFrame(() => recreateMap(reason));
+      return;
+    }
+
+    try { renderer?.setMap(null); } catch {}
+    try { tollMarkersRef.current.forEach(m => m.setMap(null)); } catch {}
+    tollMarkersRef.current = [];
+
+    const newMap = new google.maps.Map(host, {
+      center: lastCenterRef.current || { lat: -1.8312, lng: -78.1834 },
+      zoom: lastZoomRef.current ?? 6,
+      mapTypeControl: false,
+    });
+    setMapObj(newMap);
+
+    const newService = new google.maps.DirectionsService();
+    setService(newService);
+    serviceRef.current = newService;
+
+    const newRenderer = new google.maps.DirectionsRenderer({ draggable: true, map: newMap });
+    setRenderer(newRenderer);
+
+    // Reinyecta ruta si existía
+    if (lastDirectionsRef.current) {
+      newRenderer.setDirections(lastDirectionsRef.current);
+    }
+
+    renderTollMarkers(newMap, currentTolls);
+
+    // @ts-ignore
+    google.maps.event.trigger(newMap, "resize");
+    const c = newMap.getCenter(); const z = newMap.getZoom();
+    if (c && typeof z === "number") { newMap.setZoom(z); newMap.setCenter(c); }
+  }
+
+  function maybeResurrect(reason: "pageshow" | "visibilitychange" | "visible") {
+    if (isRecreatingRef.current) return;
+    if (hasCanvas()) {
+      safeResize();
+      return;
+    }
+    isRecreatingRef.current = true;
+    requestAnimationFrame(() => {
+      recreateMap(reason);
+      setTimeout(() => { isRecreatingRef.current = false; }, 150);
+    });
+  }
+
+  /* ===== Inicialización del mapa ===== */
   useEffect(() => {
     if (!ready || !mapRef.current) return;
 
@@ -119,52 +197,160 @@ export default function RoutePlanner(props: Props) {
 
     const ds = new google.maps.DirectionsService();
     setService(ds);
+    serviceRef.current = ds;
 
     const dr = new google.maps.DirectionsRenderer({ draggable: true, map });
     setRenderer(dr);
 
     dr.addListener("directions_changed", () => {
       const res = dr.getDirections();
-      if (res) processDirections(res);
+      if (res) {
+        lastDirectionsRef.current = res;
+        processDirections(res);
+      }
       scrollSummaryIntoView();
     });
 
-    // Autocomplete para inputs (EC y PE)
+    // Autocomplete en inputs (origen/destino) con listeners y guardado en mapa
     const opts: google.maps.places.AutocompleteOptions = {
-      fields: ["place_id", "geometry", "name"],
+      fields: ["place_id", "geometry", "name", "formatted_address"],
+      // opcional: restringe a EC/PE si quieres resultados más relevantes
+      // componentRestrictions: { country: ["ec", "pe"] },
     };
-    const ac: google.maps.places.Autocomplete[] = [];
-    if (originRef.current) ac.push(new google.maps.places.Autocomplete(originRef.current, opts));
-    if (destRef.current) ac.push(new google.maps.places.Autocomplete(destRef.current, opts));
-    setAutoCompletes(ac);
+    const acList: google.maps.places.Autocomplete[] = [];
+
+    if (originRef.current) {
+      const acOrigin = new google.maps.places.Autocomplete(originRef.current, opts);
+      acOrigin.bindTo("bounds", map);
+      acOrigin.addListener("place_changed", () => {
+        const place = acOrigin.getPlace();
+        // muestra algo legible en el input
+        if (place?.formatted_address) originRef.current!.value = place.formatted_address;
+        else if (place?.name) originRef.current!.value = place.name;
+      });
+      acMapRef.current.set(originRef.current, acOrigin);
+      acList.push(acOrigin);
+    }
+
+    if (destRef.current) {
+      const acDest = new google.maps.places.Autocomplete(destRef.current, opts);
+      acDest.bindTo("bounds", map);
+      acDest.addListener("place_changed", () => {
+        const place = acDest.getPlace();
+        if (place?.formatted_address) destRef.current!.value = place.formatted_address;
+        else if (place?.name) destRef.current!.value = place.name;
+      });
+      acMapRef.current.set(destRef.current, acDest);
+      acList.push(acDest);
+    }
+
+    setAutoCompletes(acList);
 
 
-    // Waypoints iniciales (si vienen como props)
+    // Waypoints iniciales
     clearWaypoints();
-    if (props.initialWaypoints && props.initialWaypoints.length > 0) {
+    if (props.initialWaypoints?.length) {
       props.initialWaypoints.forEach((wp) => addWaypointInput(typeof wp.location === "string" ? wp.location : ""));
     } else {
-      // agrega 2 inputs vacíos por comodidad
       addWaypointInput();
       addWaypointInput();
     }
 
-    // Marcadores de peajes
+    // Marcadores
     renderTollMarkers(map, currentTolls);
+
+    // Cleanup (sin tocar mapRef.current)
+    return () => {
+      try { tollMarkersRef.current.forEach(m => m.setMap(null)); } catch {}
+      try { dr.setMap(null); } catch {}
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
 
-  // Rellena inputs con props iniciales al montar / cambiar
+  /* ===== Guardar centro/zoom con idle (cleanup seguro) ===== */
+  useEffect(() => {
+    if (!mapObj) return;
+
+    const listener = mapObj.addListener("idle", () => {
+      const c = mapObj.getCenter();
+      if (c) lastCenterRef.current = { lat: c.lat(), lng: c.lng() };
+      lastZoomRef.current = mapObj.getZoom() ?? null;
+    });
+
+    return () => {
+      try {
+        if (listener && typeof (listener as any).remove === "function") {
+          (listener as any).remove();
+        } else {
+          google.maps.event.clearListeners(mapObj, "idle");
+        }
+      } catch {}
+    };
+  }, [mapObj]);
+
+  /* ===== Observadores de visibilidad/tamaño y bfcache ===== */
+  useEffect(() => {
+    const onPageShow = (e: any) => {
+      if (e && e.persisted) { maybeResurrect("pageshow"); return; }
+      requestAnimationFrame(() => maybeResurrect("pageshow"));
+    };
+    const onVisible = () => {
+      if (!document.hidden) requestAnimationFrame(() => maybeResurrect("visibilitychange"));
+    };
+    const onWindowResize = () => {
+      if (mapObj) {
+        // @ts-ignore
+        google.maps.event.trigger(mapObj, "resize");
+      }
+    };
+
+    window.addEventListener("pageshow", onPageShow);
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("resize", onWindowResize);
+
+    return () => {
+      window.removeEventListener("pageshow", onPageShow);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("resize", onWindowResize);
+    };
+  }, [mapObj]);
+
+  useEffect(() => {
+    const el = mapRef.current;
+    if (!el) return;
+
+    const io = new IntersectionObserver(([entry]) => {
+      if (entry?.isIntersecting) requestAnimationFrame(() => maybeResurrect("visible"));
+    }, { threshold: 0.01 });
+
+    const ro = new ResizeObserver(() => {
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) requestAnimationFrame(() => maybeResurrect("visible"));
+    });
+
+    io.observe(el);
+    ro.observe(el);
+
+    return () => { io.disconnect(); ro.disconnect(); };
+  }, []);
+
+  /* ===== Otros efectos ===== */
+  useEffect(() => {
+    if (showEditor && tollsTextareaRef.current) {
+      tollsTextareaRef.current.value = JSON.stringify(DEFAULT_TOLLS, null, 2);
+    }
+  }, [showEditor]);
+
   useEffect(() => {
     if (originRef.current && props.initialOrigin) originRef.current.value = props.initialOrigin;
     if (destRef.current && props.initialDestination) destRef.current.value = props.initialDestination;
   }, [props.initialOrigin, props.initialDestination]);
 
-  // Si viene un catálogo desde props, actualízalo
   useEffect(() => {
     if (props.tollsCatalog) setCurrentTolls(props.tollsCatalog);
   }, [props.tollsCatalog]);
 
+  /* ===== Lógica de UI ===== */
   function addWaypointInput(val: string = "") {
     if (!waypointsContainerRef.current) return;
 
@@ -188,8 +374,18 @@ export default function RoutePlanner(props: Props) {
     wrapper.appendChild(removeBtn);
     waypointsContainerRef.current?.appendChild(wrapper);
 
-    // Autocomplete para cada waypoint
-    const ac = new google.maps.places.Autocomplete(input);
+    // Autocomplete para cada waypoint (con listeners + guardado)
+    const ac = new google.maps.places.Autocomplete(input, {
+      fields: ["place_id", "geometry", "name", "formatted_address"],
+      // componentRestrictions: { country: ["ec", "pe"] }, // opcional
+    });
+    ac.addListener("place_changed", () => {
+      const place = ac.getPlace();
+      if (place?.formatted_address) input.value = place.formatted_address;
+      else if (place?.name) input.value = place.name;
+    });
+    acMapRef.current.set(input, ac);
+
     setAutoCompletes((prev) => [...prev, ac]);
     setWaypointInputs((prev) => [...prev, input]);
   }
@@ -202,36 +398,32 @@ export default function RoutePlanner(props: Props) {
 
   function getLocationFromInput(inputEl: HTMLInputElement | null) {
     const text = (inputEl?.value || "").trim();
-    // Si usas Autocomplete y quieres priorizar place_id:
-    // (si no tienes esto montado, deja solo el return text)
     try {
-      const ac = (window as any)._acMap?.get?.(inputEl); // opcional si guardas refs de Autocomplete
-      const place = ac?.getPlace?.();
-      if (place?.place_id) return { placeId: place.place_id };
+      if (inputEl) {
+        const ac = acMapRef.current.get(inputEl);
+        const place = ac?.getPlace?.();
+        // Si el usuario seleccionó una sugerencia, usa place_id
+        if (place?.place_id) return { placeId: place.place_id };
+      }
     } catch {}
+    // Si no seleccionó nada del dropdown, usa el texto tal cual (Maps puede resolverlo)
     return text || undefined;
   }
 
+
   function buildRouteFromInputs() {
-    if (!service || !renderer) return;
+    const svc = serviceRef.current || service;
+    if (!svc || !renderer) return;
 
     const originLoc = getLocationFromInput(originRef.current);
-    const destLoc   = getLocationFromInput(destRef.current);
-
+    const destLoc = getLocationFromInput(destRef.current);
     if (!originLoc || !destLoc) {
       alert("Por favor ingresa Origen y Destino.");
       return;
     }
 
-    // 1) Lee los waypoints como “Destinos C, D, …” (en ese orden)
-    const extraStops = waypointInputs
-      .map(i => getLocationFromInput(i))
-      .filter(Boolean) as any[];
-
-    // 2) Construye TODAS las paradas en orden: A (origen), B (destino), C... (waypoints)
+    const extraStops = waypointInputs.map(i => getLocationFromInput(i)).filter(Boolean) as any[];
     const stops = [originLoc, destLoc, ...extraStops];
-
-    // 3) Arma el request: origin = primero, destination = último, waypoints = intermedios
     const origin = stops[0];
     const destination = stops[stops.length - 1];
     const wps = stops.slice(1, -1).map(loc => ({ location: loc, stopover: true }));
@@ -241,15 +433,15 @@ export default function RoutePlanner(props: Props) {
       destination,
       waypoints: wps,
       travelMode: google.maps.TravelMode.DRIVING,
-      optimizeWaypoints: false,          // ← IMPORTANTE para respetar tu orden
+      optimizeWaypoints: false,
       provideRouteAlternatives: false,
     };
 
-    service.route(req, (result, status) => {
+    svc.route(req, (result, status) => {
       if (status === google.maps.DirectionsStatus.OK && result) {
         renderer.setDirections(result);
+        lastDirectionsRef.current = result;
         processDirections(result);
-        // si tienes el helper:
         scrollSummaryIntoView?.();
       } else if (status === google.maps.DirectionsStatus.ZERO_RESULTS) {
         alert("No se encontró ruta. Elige las opciones del Autocomplete o especifica ciudad/país.");
@@ -271,7 +463,6 @@ export default function RoutePlanner(props: Props) {
     return pts;
   }
 
-  // Interpola puntos cada N metros entre pares para evitar “saltos”
   function densifyPath(points: google.maps.LatLng[], everyMeters = 100): google.maps.LatLng[] {
     if (points.length < 2) return points;
     const out: google.maps.LatLng[] = [points[0]];
@@ -290,221 +481,6 @@ export default function RoutePlanner(props: Props) {
     }
     return out;
   }
-
-  function distPointToSeg(p: google.maps.LatLng, a: google.maps.LatLng, b: google.maps.LatLng) {
-    const l2 = google.maps.geometry.spherical.computeDistanceBetween(a, b) ** 2;
-    if (l2 === 0) return google.maps.geometry.spherical.computeDistanceBetween(p, a);
-
-    const toRad = (deg: number) => (deg * Math.PI) / 180;
-    const av = { x: toRad(a.lng()), y: toRad(a.lat()) };
-    const bv = { x: toRad(b.lng()), y: toRad(b.lat()) };
-    const pv = { x: toRad(p.lng()), y: toRad(p.lat()) };
-
-    const vx = bv.x - av.x, vy = bv.y - av.y;
-    const wx = pv.x - av.x, wy = pv.y - av.y;
-    let t = (vx * wx + vy * wy) / (vx * vx + vy * vy);
-    t = Math.max(0, Math.min(1, t));
-
-    const proj = new google.maps.LatLng(
-      a.lat() + (b.lat() - a.lat()) * t,
-      a.lng() + (b.lng() - a.lng()) * t
-    );
-    return google.maps.geometry.spherical.computeDistanceBetween(p, proj);
-  }
-
-  function touchesHuaquillas(path: google.maps.LatLng[], radiusMeters = HUAQUILLAS_RADIUS_M) {
-    if (!path || path.length < 2) return false;
-    const P = new google.maps.LatLng(HUAQUILLAS.lat, HUAQUILLAS.lng);
-
-    for (let i = 0; i < path.length - 1; i++) {
-      const a = path[i], b = path[i + 1];
-
-      // filtro barato para no calcular de más
-      const minEnd = Math.min(
-        google.maps.geometry.spherical.computeDistanceBetween(P, a),
-        google.maps.geometry.spherical.computeDistanceBetween(P, b)
-      );
-      if (minEnd > 10000) continue; // ambos extremos a >10km
-
-      if (distancePointToSegment(P, a, b) <= radiusMeters) return true;
-    }
-    return false;
-  }
-
-  function dedupeTolls(list: Toll[]): Toll[] {
-    // Preferimos la clave por nombre; si temes nombres repetidos,
-    // usa también una llave geo redondeada.
-    const seen = new Set<string>();
-    const out: Toll[] = [];
-    for (const t of list) {
-      const key =
-        (t.name?.trim().toLowerCase() || "") +
-        "|" +
-        Math.round(t.lat * 1e5) +
-        "|" +
-        Math.round(t.lng * 1e5);
-      if (!seen.has(key)) {
-        seen.add(key);
-        out.push(t);
-      }
-    }
-    return out;
-  }
-
-  /** Devuelve los km desde que el path entra en el radio del punto frontera hasta el final. */
-  function kmFromBorder(
-    path: google.maps.LatLng[],
-    border: { lat: number; lng: number },
-    radiusMeters: number
-  ): number {
-    if (!path || path.length < 2) return 0;
-    const borderLL = new google.maps.LatLng(border.lat, border.lng);
-
-    // Precalcula qué puntos están dentro del radio del cruce
-    const inside: boolean[] = path.map(p =>
-      google.maps.geometry.spherical.computeDistanceBetween(p, borderLL) <= radiusMeters
-    );
-
-    // primer índice “dentro del radio”
-    const firstIn = inside.findIndex(Boolean);
-    if (firstIn < 0) return 0; // nunca se acercó a la frontera
-
-    // último índice “dentro del radio”
-    let lastIn = -1;
-    for (let i = inside.length - 1; i >= 0; i--) {
-      if (inside[i]) { lastIn = i; break; }
-    }
-
-    // ¿la ruta EMPIEZA en Perú? (al sur del paralelo de Huaquillas)
-    const startsInPeru = path[0].lat() < border.lat;
-
-    let startIdx: number;
-    let endIdx: number;
-
-    if (lastIn > firstIn) {
-      // IDA Y VUELTA: tramo peruano = entre el primer y último contacto
-      startIdx = firstIn;
-      endIdx = lastIn;
-    } else {
-      // SOLO IDA: decidir desde dónde hasta dónde sumar
-      if (startsInPeru) {
-        // empieza en Perú y cruza hacia Ecuador
-        startIdx = 0;
-        endIdx = firstIn; // hasta tocar la frontera
-      } else {
-        // empieza en Ecuador y cruza hacia Perú
-        startIdx = firstIn;       // desde tocar la frontera
-        endIdx = path.length - 1; // hasta el final
-      }
-    }
-
-    // Suma distancias en ese rango
-    let meters = 0;
-    for (let i = startIdx; i < endIdx; i++) {
-      meters += google.maps.geometry.spherical.computeDistanceBetween(path[i], path[i + 1]);
-    }
-    return meters / 1000; // km
-  }
-
-
-  function processDirections(result: google.maps.DirectionsResult) {
-    const route = result.routes[0];
-    if (!route) return;
-
-    // km totales
-    let meters = 0;
-    route.legs.forEach(leg => meters += leg.distance?.value || 0);
-    const kmNum = meters / 1000;
-    setDistanceKm((meters / 1000).toFixed(2));
-
-    // camino denso + densificación
-    let path = getDensePathFrom(result);
-    path = densifyPath(path, 80); // cada ~80 m
-
-    const defaultThreshold = parseFloat(
-      (thresholdRef.current?.value || (showEditor ? "250" : "400"))
-    );
-    const found = detectTollsAlongPath(path, currentTolls, defaultThreshold);
-
-    setTollList(found);
-    setTollCount(found.length);
-    setTollTotal(found.reduce((a, t) => a + (t.cost || 0), 0).toFixed(2));
-
-    // Callbacks
-    props.onDistanceChange?.(meters / 1000);
-    props.onTollsChange?.(
-      found.reduce((a, t) => a + (t.cost || 0), 0),
-      found
-    );
-    props.onRouteChange?.({
-      origin: route.legs[0]?.start_address || "",
-      destination: route.legs[route.legs.length - 1]?.end_address || "",
-      waypoints: route.legs.slice(1, -1).map(leg => leg.start_address || ""),
-      routeName: route.summary || undefined,
-    });
-
-    const crossed = touchesHuaquillas(path);
-    props.onBorderCrossing?.(crossed);
-
-    if (kmNum >= 1600){
-      const kmPE = kmFromBorder(path, HUAQUILLAS, HUAQUILLAS_RADIUS_M);
-      const kmEC = kmNum - kmPE;
-      const RL = true;
-      props.onCountryKm?.({
-        RL,
-        kmEC: Math.round(kmEC),
-        kmPE: Math.round(kmPE),
-      });
-    } else {
-      const kmEC = 0;
-      const kmPE = 0;
-      const RL = false;
-      props.onCountryKm?.({
-        RL,
-        kmEC: Math.round(kmEC),
-        kmPE: Math.round(kmPE),
-      });
-    }
-  }
-
-
-
-  function detectTollsAlongPath(
-    pathLatLngs: google.maps.LatLng[],
-    tolls: Toll[],
-    defaultThresholdMeters: number
-  ): Toll[] {
-    const found: Toll[] = [];
-    if (!pathLatLngs || pathLatLngs.length < 2) return found;
-
-    for (const t of tolls) {
-      const p = new google.maps.LatLng(t.lat, t.lng);
-      const radius = t.radiusMeters ?? defaultThresholdMeters;
-
-      let hit = false;
-      for (let i = 0; i < pathLatLngs.length - 1; i++) {
-        const a = pathLatLngs[i], b = pathLatLngs[i + 1];
-
-        // filtro aproximado: si ambos extremos están >5km, sigue
-        const minEnd = Math.min(
-          google.maps.geometry.spherical.computeDistanceBetween(p, a),
-          google.maps.geometry.spherical.computeDistanceBetween(p, b)
-        );
-        if (minEnd > 5000) continue;
-
-        const d = distancePointToSegment(p, a, b);
-        if (d <= radius) { hit = true; break; }
-      }
-
-      if (hit) {
-        // evitar duplicados por ida/vuelta
-        if (!found.some(x => x.name === t.name)) found.push(t);
-      }
-    }
-    return found;
-  }
-
-
 
   function distancePointToSegment(p: google.maps.LatLng, v: google.maps.LatLng, w: google.maps.LatLng) {
     const l2 = google.maps.geometry.spherical.computeDistanceBetween(v, w) ** 2;
@@ -527,6 +503,157 @@ export default function RoutePlanner(props: Props) {
       v.lng() + (w.lng() - v.lng()) * t
     );
     return google.maps.geometry.spherical.computeDistanceBetween(p, proj);
+  }
+
+  function touchesHuaquillas(path: google.maps.LatLng[], radiusMeters = HUAQUILLAS_RADIUS_M) {
+    if (!path || path.length < 2) return false;
+    const P = new google.maps.LatLng(HUAQUILLAS.lat, HUAQUILLAS.lng);
+
+    for (let i = 0; i < path.length - 1; i++) {
+      const a = path[i], b = path[i + 1];
+      const minEnd = Math.min(
+        google.maps.geometry.spherical.computeDistanceBetween(P, a),
+        google.maps.geometry.spherical.computeDistanceBetween(P, b)
+      );
+      if (minEnd > 10000) continue;
+      if (distancePointToSegment(P, a, b) <= radiusMeters) return true;
+    }
+    return false;
+  }
+
+  function kmFromBorder(
+    path: google.maps.LatLng[],
+    border: { lat: number; lng: number },
+    radiusMeters: number
+  ): number {
+    if (!path || path.length < 2) return 0;
+    const borderLL = new google.maps.LatLng(border.lat, border.lng);
+
+    const inside: boolean[] = path.map(p =>
+      google.maps.geometry.spherical.computeDistanceBetween(p, borderLL) <= radiusMeters
+    );
+
+    const firstIn = inside.findIndex(Boolean);
+    if (firstIn < 0) return 0;
+
+    let lastIn = -1;
+    for (let i = inside.length - 1; i >= 0; i--) {
+      if (inside[i]) { lastIn = i; break; }
+    }
+
+    const startsInPeru = path[0].lat() < border.lat;
+    let startIdx: number;
+    let endIdx: number;
+
+    if (lastIn > firstIn) {
+      startIdx = firstIn;
+      endIdx = lastIn;
+    } else {
+      if (startsInPeru) {
+        startIdx = 0;
+        endIdx = firstIn;
+      } else {
+        startIdx = firstIn;
+        endIdx = path.length - 1;
+      }
+    }
+
+    let meters = 0;
+    for (let i = startIdx; i < endIdx; i++) {
+      meters += google.maps.geometry.spherical.computeDistanceBetween(path[i], path[i + 1]);
+    }
+    return meters / 1000;
+  }
+
+  function detectTollsAlongPath(
+    pathLatLngs: google.maps.LatLng[],
+    tolls: Toll[],
+    defaultThresholdMeters: number
+  ): Toll[] {
+    const found: Toll[] = [];
+    if (!pathLatLngs || pathLatLngs.length < 2) return found;
+
+    for (const t of tolls) {
+      const p = new google.maps.LatLng(t.lat, t.lng);
+      const radius = t.radiusMeters ?? defaultThresholdMeters;
+
+      let hit = false;
+      for (let i = 0; i < pathLatLngs.length - 1; i++) {
+        const a = pathLatLngs[i], b = pathLatLngs[i + 1];
+
+        const minEnd = Math.min(
+          google.maps.geometry.spherical.computeDistanceBetween(p, a),
+          google.maps.geometry.spherical.computeDistanceBetween(p, b)
+        );
+        if (minEnd > 5000) continue;
+
+        const d = distancePointToSegment(p, a, b);
+        if (d <= radius) { hit = true; break; }
+      }
+
+      if (hit) {
+        if (!found.some(x => x.name === t.name)) found.push(t);
+      }
+    }
+    return found;
+  }
+
+  function processDirections(result: google.maps.DirectionsResult) {
+    const route = result.routes[0];
+    if (!route) return;
+
+    let meters = 0;
+    route.legs.forEach(leg => meters += leg.distance?.value || 0);
+    const kmNum = meters / 1000;
+    setDistanceKm(kmNum.toFixed(2));
+
+    let path = getDensePathFrom(result);
+    path = densifyPath(path, 80);
+
+    const defaultThreshold = parseFloat((thresholdRef.current?.value || (showEditor ? "250" : "400")));
+    const found = detectTollsAlongPath(path, currentTolls, defaultThreshold);
+
+    setTollList(found);
+    setTollCount(found.length);
+    setTollTotal(found.reduce((a, t) => a + (t.cost || 0), 0).toFixed(2));
+
+    props.onDistanceChange?.(kmNum);
+    props.onTollsChange?.(found.reduce((a, t) => a + (t.cost || 0), 0), found);
+    props.onRouteChange?.({
+      origin: route.legs[0]?.start_address || "",
+      destination: route.legs[route.legs.length - 1]?.end_address || "",
+      waypoints: route.legs.slice(1, -1).map(leg => leg.start_address || ""),
+      routeName: route.summary || undefined,
+    });
+
+    const crossed = touchesHuaquillas(path);
+    props.onBorderCrossing?.(crossed);
+
+    if (kmNum >= 1600) {
+      const kmPE = kmFromBorder(path, HUAQUILLAS, HUAQUILLAS_RADIUS_M);
+      const kmEC = kmNum - kmPE;
+      const RL = true;
+      props.onCountryKm?.({ RL, kmEC: Math.round(kmEC), kmPE: Math.round(kmPE) });
+    } else {
+      props.onCountryKm?.({ RL: false, kmEC: 0, kmPE: 0 });
+    }
+  }
+
+  function renderTollMarkers(map: google.maps.Map, tolls: Toll[]) {
+    try { tollMarkersRef.current.forEach((m) => m.setMap(null)); } catch {}
+    tollMarkersRef.current = [];
+
+    const ms: google.maps.Marker[] = [];
+    tolls.forEach((t) => {
+      const m = new google.maps.Marker({
+        position: { lat: t.lat, lng: t.lng },
+        map,
+        title: `${t.name} ($${Number(t.cost).toFixed(2)})`,
+      });
+      ms.push(m);
+    });
+    tollMarkersRef.current = ms;
+    setTollMarkers(ms); // opcional para UI
   }
 
   function loadTollsFromTextarea() {
@@ -554,156 +681,135 @@ export default function RoutePlanner(props: Props) {
     alert("Peajes exportados al cuadro de texto.");
   }
 
-  function renderTollMarkers(map: google.maps.Map, tolls: Toll[]) {
-    // Borrar anteriores
-    tollMarkers.forEach((m) => m.setMap(null));
-    setTollMarkers([]);
-    const ms: google.maps.Marker[] = [];
-    tolls.forEach((t) => {
-      const m = new google.maps.Marker({
-        position: { lat: t.lat, lng: t.lng },
-        map,
-        title: `${t.name} ($${Number(t.cost).toFixed(2)})`,
-      });
-      ms.push(m);
-    });
-    setTollMarkers(ms);
-  }
-
   function scrollSummaryIntoView() {
-  // Opción 1: usar scrollIntoView (simple)
-  summaryRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-
-  // (Opcional) Opción 2: calcular desplazamiento manual
-  // if (leftPanelRef.current && summaryRef.current) {
-  //   const top = summaryRef.current.offsetTop - 12; // margen
-  //   leftPanelRef.current.scrollTo({ top, behavior: "smooth" });
-  // }
+    summaryRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
+  /* ===== Render ===== */
   return (
-    <div className="grid h-[calc(100vh-2rem)] grid-cols-[360px_1fr] gap-0 rounded-xl border border-gray-200 bg-white shadow-sm">
+    <div className="grid h-[calc(100vh-2rem)] min-h-0 grid-cols-[360px_1fr] gap-0 rounded-xl border border-gray-200 bg-white shadow-sm">
       <Script
         src={`https://maps.googleapis.com/maps/api/js?key=${apiKey || ""}&libraries=places,geometry`}
         strategy="afterInteractive"
         onLoad={() => setReady(true)}
       />
 
-      <div ref={leftPanelRef} className="h-full overflow-auto p-4 border-r">
-      <h2 className="mb-2 text-xl font-semibold">Planificador de Ruta con Peajes</h2>
-      <p className="text-sm text-gray-600">
-        Arrastra la ruta en el mapa para ajustar el recorrido. Se recalculan kilómetros y peajes automáticamente.
-      </p>
+      {/* Columna izquierda (panel) */}
+      <div ref={leftPanelRef} className="h-full min-h-0 min-w-0 overflow-auto p-4 border-r">
+        <h2 className="mb-2 text-xl font-semibold">Planificador de Ruta con Peajes</h2>
+        <p className="text-sm text-gray-600">
+          Arrastra la ruta en el mapa para ajustar el recorrido. Se recalculan kilómetros y peajes automáticamente.
+        </p>
 
-      {/* Origen / Destino / Waypoints */}
-      <div className="mt-4 space-y-4">
-        <div>
-          <label className="text-xs text-gray-700">Origen</label>
-          <input
-            ref={originRef}
-            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2"
-            placeholder="Ej: Puerto Bolívar, Ecuador"
-            defaultValue={props.initialOrigin || "LOGISBUR SA - Centro Logístico, Via Balosa Machala, Machala, Ecuador"}
-          />
-        </div>
-        <div>
-          <label className="text-xs text-gray-700">Destino</label>
-          <input
-            ref={destRef}
-            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2"
-            placeholder="Ej: Quito, Ecuador"
-            defaultValue={props.initialDestination || ""}
-          />
-        </div>
-        <div>
-          <label className="text-xs text-gray-700">Waypoints</label>
-          <div ref={waypointsContainerRef} className="mt-1" />
-          <div className="mt-2 flex gap-2">
-            <button onClick={() => addWaypointInput()} className="rounded-lg border px-3 py-2 text-sm">+ Añadir waypoint</button>
-            <button onClick={clearWaypoints} className="rounded-lg border px-3 py-2 text-sm">Limpiar</button>
+        {/* Origen / Destino / Waypoints */}
+        <div className="mt-4 space-y-4">
+          <div>
+            <label className="text-xs text-gray-700">Origen</label>
+            <input
+              ref={originRef}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2"
+              placeholder="Ej: Puerto Bolívar, Ecuador"
+              defaultValue={props.initialOrigin || "LOGISBUR SA - Centro Logístico, Via Balosa Machala, Machala, Ecuador"}
+            />
           </div>
-          <div className="mt-1 text-xs text-gray-500">
-            Los waypoints se consideran paradas <b>después del destino</b>. Para ida y vuelta, añade de waypoint el mismo origen.
+          <div>
+            <label className="text-xs text-gray-700">Destino</label>
+            <input
+              ref={destRef}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2"
+              placeholder="Ej: Quito, Ecuador"
+              defaultValue={props.initialDestination || ""}
+            />
           </div>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={buildRouteFromInputs} className="rounded-lg bg-gray-900 px-3 py-2 text-white">
-            Generar ruta
-          </button>
-        </div>
-      </div>
-
-      {/* === Resumen + Detalle SIEMPRE visible === */}
-      <div ref={summaryRef} className="border-t pt-4">
-        <div className="flex items-center justify-between">
-          <span className="inline-block rounded-full bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-800">Resumen</span>
-          <span className="text-xs text-gray-500">Unidades: km y USD</span>
-        </div>
-
-        <div className="mt-2 flex items-center justify-between">
-          <div>Distancia total</div>
-          <div className="font-semibold">{distanceKm} km</div>
-        </div>
-        <div className="mt-2 flex items-center justify-between">
-          <div>Peajes en ruta</div>
-          <div className="font-semibold">{tollCount}</div>
-        </div>
-        <div className="mt-2 flex items-center justify-between">
-          <div>Total peajes</div>
-          <div className="font-semibold tabular-nums">${tollTotal}</div>
-        </div>
-
-        <div className="mt-3 rounded-lg border border-dashed p-2">
-          <div className="mb-1 font-semibold">Detalle de peajes detectados</div>
-          {tollList.length === 0 ? (
-            <div className="text-sm text-gray-500">—</div>
-          ) : (
-            <div className="space-y-1">
-              {tollList.map((t, i) => (
-                <div key={i} className="flex items-center justify-between text-sm">
-                  <span>{t.name}</span>
-                  <span className="tabular-nums">${t.cost.toFixed(2)}</span>
-                </div>
-              ))}
+          <div>
+            <label className="text-xs text-gray-700">Waypoints</label>
+            <div ref={waypointsContainerRef} className="mt-1" />
+            <div className="mt-2 flex gap-2">
+              <button onClick={() => addWaypointInput()} className="rounded-lg border px-3 py-2 text-sm">+ Añadir waypoint</button>
+              <button onClick={clearWaypoints} className="rounded-lg border px-3 py-2 text-sm">Limpiar</button>
             </div>
-          )}
+            <div className="mt-1 text-xs text-gray-500">
+              Los waypoints se consideran paradas <b>después del destino</b>. Para ida y vuelta, añade de waypoint el mismo origen.
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={buildRouteFromInputs} className="rounded-lg bg-gray-900 px-3 py-2 text-white">
+              Generar ruta
+            </button>
+          </div>
         </div>
-      </div>
 
-      {/* === Catálogo JSON SOLO si showEditor === */}
-      {showEditor && (
-        <div className="border-t pt-4">
+        {/* Resumen */}
+        <div ref={summaryRef} className="border-t pt-4">
           <div className="flex items-center justify-between">
-            <span className="inline-block rounded-full bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-800">
-              Catálogo de Peajes
-            </span>
-            <span className="text-xs text-gray-500">Edita y pega tus coordenadas/costos</span>
+            <span className="inline-block rounded-full bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-800">Resumen</span>
+            <span className="text-xs text-gray-500">Unidades: km y USD</span>
           </div>
-          <div className="mt-1 text-xs text-gray-500">
-            Formato: [{"{"}"name":"Peaje X","lat":-3.26,"lng":-79.96,"cost":1.50{"}"} , ...]
+
+          <div className="mt-2 flex items-center justify-between">
+            <div>Distancia total</div>
+            <div className="font-semibold">{distanceKm} km</div>
           </div>
-          <textarea
-            ref={tollsTextareaRef}
-            className="mt-2 h-36 w-full rounded-lg border border-gray-300 p-2 font-mono text-sm"
-          />
-          <div className="mt-2 flex gap-2">
-            <button onClick={loadTollsFromTextarea} className="rounded-lg border px-3 py-2 text-sm">Cargar peajes</button>
-            <button onClick={exportTollsToTextarea} className="rounded-lg border px-3 py-2 text-sm">Exportar JSON</button>
+          <div className="mt-2 flex items-center justify-between">
+            <div>Peajes en ruta</div>
+            <div className="font-semibold">{tollCount}</div>
           </div>
-          <div className="mt-2">
-            <label className="text-xs text-gray-700">Umbral de detección (m)</label>
-            <input ref={thresholdRef} defaultValue="500" type="number" className="ml-2 w-24 rounded-lg border border-gray-300 px-2 py-1" />
+          <div className="mt-2 flex items-center justify-between">
+            <div>Total peajes</div>
+            <div className="font-semibold tabular-nums">${tollTotal}</div>
+          </div>
+
+          <div className="mt-3 rounded-lg border border-dashed p-2">
+            <div className="mb-1 font-semibold">Detalle de peajes detectados</div>
+            {tollList.length === 0 ? (
+              <div className="text-sm text-gray-500">—</div>
+            ) : (
+              <div className="space-y-1">
+                {tollList.map((t, i) => (
+                  <div key={i} className="flex items-center justify-between text-sm">
+                    <span>{t.name}</span>
+                    <span className="tabular-nums">${t.cost.toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
-      )}
 
-      <div className="border-t pt-4 text-xs text-gray-500">
-        © LOGISBUR — Utilidad interna. Requiere Maps JavaScript API y Places API.
+        {/* Catálogo JSON (opcional) */}
+        {showEditor && (
+          <div className="border-t pt-4">
+            <div className="flex items-center justify-between">
+              <span className="inline-block rounded-full bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-800">
+                Catálogo de Peajes
+              </span>
+              <span className="text-xs text-gray-500">Edita y pega tus coordenadas/costos</span>
+            </div>
+            <div className="mt-1 text-xs text-gray-500">
+              Formato: [{"{"}"name":"Peaje X","lat":-3.26,"lng":-79.96,"cost":1.50{"}"} , ...]
+            </div>
+            <textarea
+              ref={tollsTextareaRef}
+              className="mt-2 h-36 w-full rounded-lg border border-gray-300 p-2 font-mono text-sm"
+            />
+            <div className="mt-2 flex gap-2">
+              <button onClick={loadTollsFromTextarea} className="rounded-lg border px-3 py-2 text-sm">Cargar peajes</button>
+              <button onClick={exportTollsToTextarea} className="rounded-lg border px-3 py-2 text-sm">Exportar JSON</button>
+            </div>
+            <div className="mt-2">
+              <label className="text-xs text-gray-700">Umbral de detección (m)</label>
+              <input ref={thresholdRef} defaultValue="500" type="number" className="ml-2 w-24 rounded-lg border border-gray-300 px-2 py-1" />
+            </div>
+          </div>
+        )}
+
+        <div className="border-t pt-4 text-xs text-gray-500">
+          © LOGISBUR — Utilidad interna. Requiere Maps JavaScript API y Places API.
+        </div>
       </div>
-    </div>
 
-
-      <div ref={mapRef} className="h-full w-full" />
+      {/* Columna derecha (mapa) */}
+      <div ref={mapRef} className="relative h-full min-h-0 min-w-0 w-full" />
     </div>
   );
 }
