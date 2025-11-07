@@ -105,7 +105,7 @@ const FOB_DEFAULTS: FOBCtx = {
 
 const COSTS_MASTER: CostItem[] = [
   /* ============ IMPORTACIÓN ============ */
-  { id: "agencia-pe", label: "Agencia Perú", valuesByOp: { importacion:120 }, unitLabel:"servicio", ops:["importacion"] },
+  { id: "agencia-pe", label: "Agencia Perú", valuesByOp: { importacion:120 }, unitLabel:"", ops:["importacion"] },
 
   // Bodega Perú (Import.): 0,30% FOB + 18% IGV (mín. 65)
   {
@@ -123,7 +123,7 @@ const COSTS_MASTER: CostItem[] = [
     formulaHint: "0,30% FOB + 18% IGV (mín. 65)"
   },
 
-  { id: "agencia-ec-imp", label: "Agencia Ecuador (incluye IVA)", valuesByOp: { importacion:265 }, unitLabel:"servicio", ops:["importacion"] },
+  { id: "agencia-ec-imp", label: "Agencia Ecuador", valuesByOp: { importacion:265 }, unitLabel:"", ops:["importacion"] },
 
   // Bodega Ecuador (Import.): 0,35% CIF + $40 Base + $10 Báscula + 15% IVA (mín. 65)
   {
@@ -395,7 +395,7 @@ export default function Page(){
     let comb=0,cEC=0,cPE=0,pref=0,cec=0,pexc=0;
     if(modo==="logisbur"){ const r=8;
       if(mixto){ const cover=Math.max(0,cap*r-cfg.bufferPreFronteraKm); pref=cap*cfg.precioGalonEC; cec=(kmEC/r)*cfg.precioGalonEC; const kmPEfac=Math.max(0,kmPE-cover); pexc=(kmPEfac/r)*cfg.precioGalonPE; cEC=pref+cec; cPE=pexc; comb=cEC+cPE; }
-      else{ const um=cap*r; const kmE=Math.min(km,um), kmP=Math.max(0,km-um); cEC=(kmE/r)*cfg.precioGalonEC; cPE=(kmP/r)*cfg.precioGalonPE; comb=cEC+cPE; }
+      else{ cEC=(km/r)*cfg.precioGalonEC; comb=cEC; cPE=0; }
     } else { const r=V.rendKmGal; comb=(km/r)*cfg.precioGalonEC; cEC=comb; cPE=0; }
     const ins=km*(V.insumos.llantasKm+V.insumos.aceiteMotorKm+V.insumos.aceiteCoronaKm+V.insumos.filtrosKm);
     const dep=km*((cfg.factorDepreciacion*(V.baseDepreciacionUSD))/cfg.vidaUtilKm);

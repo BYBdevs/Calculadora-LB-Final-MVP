@@ -14,6 +14,7 @@ const defaultLogo = "/logo.png";
 
 const styles = StyleSheet.create({
   page: { padding: 24,paddingTop:38,paddingHorizontal:60, paddingBottom: 88, fontSize: 11, color: TEXT_PRIMARY, position: "relative" },
+  pag:{padding: 24,paddingTop:38, paddingBottom: 88, fontSize: 11, color: TEXT_PRIMARY, position: "relative" },
   row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   h1: { fontSize: 22, fontWeight: 800 },
   small: { fontSize: 9, color: TEXT_MUTED },
@@ -31,7 +32,7 @@ const styles = StyleSheet.create({
 
   // Header decorativo
   headerWrap: { position: "relative", marginBottom: 28, height: 34, justifyContent: "center", alignItems: "center"},
-  orangeBar: { backgroundColor: BRAND_ORANGE, height: 42, width: "100%", position: "absolute", top: 0, left: 0 },
+  orangeBar: { backgroundColor: BRAND_ORANGE, height: 42, width: "100%", position: "absolute", top: 0, left: 0, paddingHorizontal: 16 },
   stripeWrap: { position: "absolute", top: 0, left: 0, flexDirection: "row" },
   stripe: { backgroundColor: "white", width: 10, height: 42, transform: "skewX(-20deg)", marginRight: 4 },
   headerContent: {
@@ -154,7 +155,7 @@ export default function LogisburPDF({
                 return (
                   <View key={c.id} style={styles.row}>
                     <Text style={{ flex: 1 }}>{etiqueta}</Text>
-                    <Text style={{ width: 120, textAlign: "right" }}>{valor}</Text>
+                    <Text style={{textAlign:"left", width:"300" }}>{valor}</Text>
                   </View>
                 );
               })}
