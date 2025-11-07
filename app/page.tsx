@@ -111,7 +111,7 @@ const COSTS_MASTER: CostItem[] = [
   {
     id: "bodega-pe-imp",
     label: "Bodega Perú",
-    unitLabel: "0,30% FOB + 18% IGV (mín. 65)",
+    unitLabel: "0,30% FOB + 18% IGV (Mínimo $65,00)",
     ops:["importacion"],
     calc: (ctx) => {
       if (!ctx.fob || ctx.fob<=0) return null;
@@ -120,7 +120,7 @@ const COSTS_MASTER: CostItem[] = [
       const total = Math.max(ctx.minBodega, base);
       return total;
     },
-    formulaHint: "0,30% FOB + 18% IGV (mín. 65)"
+    formulaHint: "0,30% FOB + 18% IGV (Mínimo $65,00)"
   },
 
   { id: "agencia-ec-imp", label: "Agencia Ecuador", valuesByOp: { importacion:265 }, unitLabel:"", ops:["importacion"] },
@@ -129,7 +129,7 @@ const COSTS_MASTER: CostItem[] = [
   {
     id: "bodega-ec-imp",
     label: "Bodega Ecuador",
-    unitLabel: "0,35% CIF + $40 Base + $10 Báscula + 15% IVA (mín. 65)",
+    unitLabel: "0,35% CIF + $40 Base + $10 Báscula + 15% IVA (Mínimo $65,00)",
     ops:["importacion"],
     calc: (ctx) => {
       if (!ctx.fleteCIF || ctx.fleteCIF <=0) return null;
@@ -139,20 +139,20 @@ const COSTS_MASTER: CostItem[] = [
       const total = Math.max(ctx.minBodega, baseconIVA);
       return total;                         // +15% IVA
     },
-    formulaHint: "0,35% CIF + $40 Base + $10 Báscula + 15% IVA (mín. 65)"
+    formulaHint: "0,35% CIF + $40 Base + $10 Báscula + 15% IVA (Mínimo $65,00)"
   },
 
   // Seguro (Import.): 0,30% FOB (mín. 65)
   {
     id: "seguro-imp",
     label: "Seguro de la carga",
-    unitLabel: "0,30% FOB (mín. 65)",
+    unitLabel: "0,30% FOB (Mínimo $65,00)",
     ops:["importacion"],
     calc: (ctx) => {
       if (!ctx.fob || ctx.fob<=0) return null;
       return Math.max(ctx.minSeguro, ctx.fob * ctx.seguroPct);
     },
-    formulaHint: "0,30% FOB (mín. 65)"
+    formulaHint: "0,30% FOB (Mínimo $65,00)"
   },
 
   /* ============ EXPORTACIÓN ============ */
@@ -181,13 +181,13 @@ const COSTS_MASTER: CostItem[] = [
   {
     id: "seguro-exp",
     label: "Seguro de la carga",
-    unitLabel: "0,40% FOB (mín. 65)",
+    unitLabel: "0,40% FOB (Mínimo $65,00)",
     ops:["exportacion"],
     calc: (ctx) => {
       if (!ctx.fob || ctx.fob<=0) return null;
       return Math.max(ctx.minSeguro, ctx.fob * ctx.seguroPct);
     },
-    formulaHint: "0,40% FOB (mín. 65)"
+    formulaHint: "0,40% FOB (Mínimo $65,00)"
   },
 ];
 
@@ -429,7 +429,6 @@ export default function Page(){
       observaciones={observaciones}
       manerapago={manerapago}
       operacion={operacion}
-      logoUrl={logoUrl}
     />
   );
   const blob = await pdf(doc).toBlob();
