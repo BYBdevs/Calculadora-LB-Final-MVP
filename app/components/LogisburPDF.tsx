@@ -14,6 +14,7 @@ const defaultLogo = "/logo.png";
 
 const styles = StyleSheet.create({
   page: { padding: 24,paddingTop:38,paddingHorizontal:60, paddingBottom: 88, fontSize: 11, color: TEXT_PRIMARY, position: "relative" },
+  pag:{padding: 24,paddingTop:38, paddingBottom: 88, fontSize: 11, color: TEXT_PRIMARY, position: "relative" },
   row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   h1: { fontSize: 22, fontWeight: 800 },
   small: { fontSize: 9, color: TEXT_MUTED },
@@ -31,7 +32,7 @@ const styles = StyleSheet.create({
 
   // Header decorativo
   headerWrap: { position: "relative", marginBottom: 28, height: 34, justifyContent: "center", alignItems: "center"},
-  orangeBar: { backgroundColor: BRAND_ORANGE, height: 42, width: "100%", position: "absolute", top: 0, left: 0 },
+  orangeBar: { backgroundColor: BRAND_ORANGE, height: 42, width: "100%", position: "absolute", top: 0, left: 0, paddingHorizontal: 16 },
   stripeWrap: { position: "absolute", top: 0, left: 0, flexDirection: "row" },
   stripe: { backgroundColor: "white", width: 10, height: 42, transform: "skewX(-20deg)", marginRight: 4 },
   headerContent: {
@@ -49,6 +50,8 @@ const styles = StyleSheet.create({
 });
 
 const money = (n: number) => `$ ${Number(n || 0).toFixed(2)}`;
+const isNum = (v: unknown) => Number.isFinite(Number(v));
+
 
 export default function LogisburPDF({
   ciudad, cliente, producto, unidadCarga,
@@ -137,13 +140,23 @@ export default function LogisburPDF({
         <View style={[styles.box, styles.mb4]}>
           {costosSel && costosSel.length > 0 ? (
             <View style={styles.ul}>
-              {costosSel.map((c, i) => {
-                const isNum = isFinite(Number(c.unitUSD));
-                const val = isNum ? money(Number(c.unitUSD)) : (c.unitLabel || "—");
+              {costosSel.map((c) => {
+                const numeric = isNum(c.unitUSD);
+                // Si hay número, mostramos (unitLabel) al lado del nombre; si no, NO.
+                const etiqueta = numeric
+                  ? `${c.label}${c.unitLabel ? ` (${c.unitLabel})` : ""}`
+                  : c.label;
+
+                // Si hay número, el valor es dinero; si no, el valor es la fórmula (unitLabel) una sola vez.
+                const valor = numeric
+                  ? money(Number(c.unitUSD))
+                  : (c.unitLabel || "—");
+
                 return (
-                  <Text key={c.id || String(i)} style={styles.li}>
-                    • {c.label}{c.unitLabel ? ` (${c.unitLabel})` : ""}: {val}
-                  </Text>
+                  <View key={c.id} style={styles.row}>
+                    <Text style={{ flex: 1 }}>{etiqueta}</Text>
+                    <Text style={{textAlign:"left", width:"300" }}>{valor}</Text>
+                  </View>
                 );
               })}
             </View>

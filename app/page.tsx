@@ -105,7 +105,7 @@ const FOB_DEFAULTS: FOBCtx = {
 
 const COSTS_MASTER: CostItem[] = [
   /* ============ IMPORTACIÓN ============ */
-  { id: "agencia-pe", label: "Agencia Perú", valuesByOp: { importacion:120 }, unitLabel:"servicio", ops:["importacion"] },
+  { id: "agencia-pe", label: "Agencia Perú", valuesByOp: { importacion:120 }, unitLabel:"", ops:["importacion"] },
 
   // Bodega Perú (Import.): 0,30% FOB + 18% IGV (mín. 65)
   {
@@ -123,7 +123,7 @@ const COSTS_MASTER: CostItem[] = [
     formulaHint: "0,30% FOB + 18% IGV (mín. 65)"
   },
 
-  { id: "agencia-ec-imp", label: "Agencia Ecuador (incluye IVA)", valuesByOp: { importacion:265 }, unitLabel:"servicio", ops:["importacion"] },
+  { id: "agencia-ec-imp", label: "Agencia Ecuador", valuesByOp: { importacion:265 }, unitLabel:"", ops:["importacion"] },
 
   // Bodega Ecuador (Import.): 0,35% CIF + $40 Base + $10 Báscula + 15% IVA (mín. 65)
   {
@@ -395,7 +395,7 @@ export default function Page(){
     let comb=0,cEC=0,cPE=0,pref=0,cec=0,pexc=0;
     if(modo==="logisbur"){ const r=8;
       if(mixto){ const cover=Math.max(0,cap*r-cfg.bufferPreFronteraKm); pref=cap*cfg.precioGalonEC; cec=(kmEC/r)*cfg.precioGalonEC; const kmPEfac=Math.max(0,kmPE-cover); pexc=(kmPEfac/r)*cfg.precioGalonPE; cEC=pref+cec; cPE=pexc; comb=cEC+cPE; }
-      else{ const um=cap*r; const kmE=Math.min(km,um), kmP=Math.max(0,km-um); cEC=(kmE/r)*cfg.precioGalonEC; cPE=(kmP/r)*cfg.precioGalonPE; comb=cEC+cPE; }
+      else{ cEC=(km/r)*cfg.precioGalonEC; comb=cEC; cPE=0; }
     } else { const r=V.rendKmGal; comb=(km/r)*cfg.precioGalonEC; cEC=comb; cPE=0; }
     const ins=km*(V.insumos.llantasKm+V.insumos.aceiteMotorKm+V.insumos.aceiteCoronaKm+V.insumos.filtrosKm);
     const dep=km*((cfg.factorDepreciacion*(V.baseDepreciacionUSD))/cfg.vidaUtilKm);
@@ -659,7 +659,9 @@ export default function Page(){
                           </span>
                           <span className={`tabular-nums ${hasNumeric?"":"text-slate-500 italic"}`}>{rightText}</span>
                         </label>
-                        {item.unitLabel && <div className="text-[11px] text-slate-500 ml-6">({item.unitLabel})</div>}
+                        {hasNumeric && item.unitLabel && (
+                          <div className="text-[11px] text-slate-500 ml-6">({item.unitLabel})</div>
+                        )}
                         {checked && (
                         <div className="ml-6 mt-2 space-y-2">
                           {/* Descripción */}
@@ -866,7 +868,10 @@ export default function Page(){
                               const isNum = isFinite(Number(c.unitUSD));
                               return (
                                 <div key={c.id} className="flex items-center justify-between text-sm">
-                                  <span>{c.label}{c.unitLabel?` (${c.unitLabel})`:""}</span>
+                                  <span>
+                                    {c.label}
+                                    {isNum && c.unitLabel ? ` (${c.unitLabel})` : ""}
+                                  </span>
                                   {isNum
                                     ? <span className="tabular-nums"><b>{money(Number(c.unitUSD))}</b></span>
                                     : <span className="text-slate-500 italic">{(c.formulaHint||c.unitLabel||"fórmula")}</span>}
@@ -1112,11 +1117,15 @@ function Reporte({
   const fecha = hoy.toLocaleDateString("es-ES", {day: "numeric", month: "long", year: "numeric"});
   const hora  = hoy.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
 
-  const listaAdic = costosSel.map(c=>{
+  const listaAdic = costosSel.map(c => {
     const isNum = isFinite(Number(c.unitUSD));
+    const etiqueta = isNum
+      ? `${c.label}${c.unitLabel ? ` (${c.unitLabel})` : ""}`
+      : c.label;
     const texto = isNum ? money(Number(c.unitUSD)) : (c.unitLabel || "—");
-    return `${c.label}${` (${c.unitLabel})`}: ${isNum ? texto : texto}`;
+    return `${etiqueta}: ${texto}`;
   });
+
 
   const tituloOp = operacion === "importacion"
     ? "IMPORTACIÓN"
