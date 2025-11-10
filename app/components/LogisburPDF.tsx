@@ -36,7 +36,15 @@ const styles = StyleSheet.create({
   sectionTitle: { fontWeight: 700, marginBottom: 4 },
   listRow: { flexDirection: "row", alignItems: "center", marginBottom: 4 },
   listKey: { flex: 1 },
-  listVal: { textAlign: "left", width: 300 },
+  listVal: { textAlign: "left", width: 290 },
+
+  boxBancario: {
+    borderWidth: 1,
+    borderColor: "#D1D5DB", // gris suave
+    borderRadius: 6,
+    padding: 10,
+    backgroundColor: "#FAFAFA", // leve contraste
+  },
 
   // fondo
   backgroundImage: {
@@ -73,11 +81,6 @@ export default function LogisburPDF({
         ) : null}
 
         {/* Encabezado de fecha/ciudad (SIN header gráfico, solo texto) */}
-        
-
-        {/* Cuerpo */}
-        <View style={styles.row}>
-        <Text style={styles.mb3}>Estimado {cliente || "cliente"},</Text>
         <View style={[styles.row, styles.mb3]}>
           <View><Text> </Text></View>
           <View style={{ alignItems: "flex-end" }}>
@@ -87,9 +90,11 @@ export default function LogisburPDF({
             </Text>
           </View>
         </View>
-        </View>
+
+        {/* Cuerpo */}
+        <Text style={styles.mb3}>Estimado {cliente || "cliente"},</Text>
         <Text style={styles.mb4}>
-          Por medio de la presente, ponemos a su conocimiento los valores de logística solicitados:
+          Por medio de la presente, ponemos en su conocimiento los valores correspondientes al servicio logístico solicitado:
         </Text>
 
         {/* Datos en orden vertical: Producto, Unidad de Carga, Origen, Destino */}
@@ -122,9 +127,14 @@ export default function LogisburPDF({
               {costosSel.map((c) => {
                 const numeric = isNum(c.unitUSD);
                 const etiqueta = numeric
-                  ? `${c.label}${c.unitLabel ? ` (${c.unitLabel})` : ""}`
+                  ? (operacion === "transito" ? c.label : `${c.label}${c.unitLabel ? ` (${c.unitLabel})` : ""}`)
                   : c.label;
-                const valor = numeric ? money(Number(c.unitUSD)) : (c.unitLabel || "—");
+
+                const valor = numeric
+                  ? (operacion === "transito"
+                      ? `${money(Number(c.unitUSD))}${c.unitLabel ? ` (${c.unitLabel})` : ""}`
+                      : money(Number(c.unitUSD)))
+                  : (c.unitLabel || "—");
                 return (
                   <View key={c.id} style={styles.listRow}>
                     <Text style={styles.listKey}>{etiqueta}</Text>
@@ -147,22 +157,20 @@ export default function LogisburPDF({
         {/* Condición de pago (sin marcos) */}
         <View style={styles.mb4}>
           <Text>
-            <Text style={styles.label}>Condición de pago: </Text>
+            <Text style={styles.label}>Forma de pago: </Text>
             {manerapago || "—"}
           </Text>
         </View>
 
         {/* Datos bancarios (sin marcos) */}
-        <View>
-          <Text style={styles.mb2}>El pago se debe realizar a través de depósito o transferencia a:</Text>
-          <Text style={styles.mb2}>Datos del beneficiario:</Text>
-          <Text>BURNEO LOGÍSTICA CARGA INTERNACIONAL LOGISBUR S.A.</Text>
-          <Text>Ruc: 0791796571001</Text>
+        <View style={styles.boxBancario}>
+          <Text style={styles.mb2}>Depósito o transferencia bancaria a:</Text>
+          <Text>Beneficiario: Burneo Logística Carga Internacional Logisbur S.A.</Text>
+          <Text>RUC: 0791796571001</Text>
           <Text>Banco Pichincha C.A.</Text>
-          <Text>Número de Cta. Corriente: 2100169035</Text>
-          <Text>Swift: PICHECEQ</Text>
-          <Text style={styles.mb2}>Gastos de envío: Full Transfer Value - OUR</Text>
-          <Text style={styles.small}>*Costos por transferencia no serán asumidos por Logisbur S.A.</Text>
+          <Text>Cuenta Corriente: 2100169035</Text>
+          <Text>Código SWIFT: PICHECEQ</Text>
+          <Text style={styles.mb2}>Condición: Full Transfer Value – OUR</Text>
         </View>
       </Page>
     </Document>

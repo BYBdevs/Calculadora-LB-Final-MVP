@@ -235,6 +235,7 @@ const getCatalog = (op: OperationType, fobCtx: FOBCtx): CostItem[] =>
 
 const money=(n:number)=>`$ ${Number(n||0).toFixed(2)}`;
 const r5=(n:number)=>Math.ceil(n/5)*5;
+const peajeFactorByVeh = (vehId: string) => (vehId === "2e" ? 1/3 : vehId === "3e" ? 1/2 : 1);
 
 /* ===== App ===== */
 export default function Page(){
@@ -393,13 +394,13 @@ export default function Page(){
 
   const res=useMemo(()=>{ if(!V) return null; const cap=caps[veh]??200;
     let comb=0,cEC=0,cPE=0,pref=0,cec=0,pexc=0;
-    if(modo==="logisbur"){ const r=8;
+    if(modo==="logisbur"){ const r=V.rendKmGal;
       if(mixto){ const cover=Math.max(0,cap*r-cfg.bufferPreFronteraKm); pref=cap*cfg.precioGalonEC; cec=(kmEC/r)*cfg.precioGalonEC; const kmPEfac=Math.max(0,kmPE-cover); pexc=(kmPEfac/r)*cfg.precioGalonPE; cEC=pref+cec; cPE=pexc; comb=cEC+cPE; }
       else{ cEC=(km/r)*cfg.precioGalonEC; comb=cEC; cPE=0; }
     } else { const r=V.rendKmGal; comb=(km/r)*cfg.precioGalonEC; cEC=comb; cPE=0; }
     const ins=km*(V.insumos.llantasKm+V.insumos.aceiteMotorKm+V.insumos.aceiteCoronaKm+V.insumos.filtrosKm);
     const dep=km*((cfg.factorDepreciacion*(V.baseDepreciacionUSD))/cfg.vidaUtilKm);
-    const p=peajes;
+    const p=peajes * peajeFactorByVeh(veh);
     const dPE=Math.max(0,Math.min(dias,dPeru)), dEC=Math.max(0,dias-dPE);
     const per=dias*cfg.costoConductorDia + dEC*cfg.viaticoEC + dPE*cfg.viaticoPE + dias*cfg.costoAdminFijoDia;
     const cf=(modo==="logisbur"&&cruceOn)?cfg.cruceFronteraUSD:0;
@@ -648,7 +649,12 @@ export default function Page(){
                     const sel=costosSel.find(c=>c.id===item.id);
                     const checked=!!sel;
                     const hasNumeric = isFinite(Number(item.unitUSD));
-                    const rightText = hasNumeric ? money(Number(item.unitUSD)) : (item.formulaHint || item.unitLabel );
+                    // Mostrar (unidad) DESPUÉS del valor SOLO si es tránsito
+                    const rightText = hasNumeric
+                      ? (operacion === "transito"
+                          ? `${money(Number(item.unitUSD))}${item.unitLabel ? ` (${item.unitLabel})` : ""}`
+                          : money(Number(item.unitUSD)))
+                      : (item.formulaHint || item.unitLabel);
                     return (
                       <div key={item.id} className="rounded-lg border px-2 py-2 text-sm">
                         <label className="flex items-center justify-between">
@@ -658,7 +664,7 @@ export default function Page(){
                           </span>
                           <span className={`tabular-nums ${hasNumeric?"":"text-slate-500 italic"}`}>{rightText}</span>
                         </label>
-                        {hasNumeric && item.unitLabel && (
+                        {hasNumeric && item.unitLabel && operacion !== "transito" && (
                           <div className="text-[11px] text-slate-500 ml-6">({item.unitLabel})</div>
                         )}
                         {checked && (
@@ -868,12 +874,21 @@ export default function Page(){
                               return (
                                 <div key={c.id} className="flex items-center justify-between text-sm">
                                   <span>
-                                    {c.label}
-                                    {isNum && c.unitLabel ? ` (${c.unitLabel})` : ""}
+                                  {c.label}
+                                  {/* Para import/export va después del label; en tránsito NO lo mostramos aquí */}
+                                  {operacion !== "transito" && isNum && c.unitLabel ? ` (${c.unitLabel})` : ""}
+                                </span>
+                                {isNum ? (
+                                  <span className="tabular-nums">
+                                    <b>
+                                      {money(Number(c.unitUSD))}
+                                      {/* En tránsito el (unidad) va DESPUÉS del valor */}
+                                      {operacion === "transito" && c.unitLabel ? ` (${c.unitLabel})` : ""}
+                                    </b>
                                   </span>
-                                  {isNum
-                                    ? <span className="tabular-nums"><b>{money(Number(c.unitUSD))}</b></span>
-                                    : <span className="text-slate-500 italic">{(c.formulaHint||c.unitLabel||"fórmula")}</span>}
+                                ) : (
+                                  <span className="text-slate-500 italic">{(c.formulaHint || c.unitLabel || "fórmula")}</span>
+                                )}
                                 </div>
                               );
                             })}
@@ -1119,9 +1134,14 @@ function Reporte({
   const listaAdic = costosSel.map(c => {
     const isNum = isFinite(Number(c.unitUSD));
     const etiqueta = isNum
-      ? `${c.label}${c.unitLabel ? ` (${c.unitLabel})` : ""}`
+      ? (operacion === "transito" ? c.label : `${c.label}${c.unitLabel ? ` (${c.unitLabel})` : ""}`)
       : c.label;
-    const texto = isNum ? money(Number(c.unitUSD)) : (c.unitLabel || "—");
+
+    const texto = isNum
+      ? (operacion === "transito"
+          ? `${money(Number(c.unitUSD))}${c.unitLabel ? ` (${c.unitLabel})` : ""}`
+          : money(Number(c.unitUSD)))
+      : (c.unitLabel || "—");
     return `${etiqueta}: ${texto}`;
   });
 
