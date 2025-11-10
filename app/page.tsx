@@ -60,6 +60,13 @@ const PEAJES = [
 
 type OperationType = "importacion" | "exportacion" | "transito";
 
+// Flags de features para mostrar/ocultar pestañas
+const FEATURES = {
+  showInterno: false,
+  showComercial: false,
+};
+
+
 /** ====== NUEVO: Modelo de ítems con soporte por operación y fórmulas (FOB/CIF) ====== */
 type FixedValsByOp = Partial<Record<OperationType, number>>;
 type CostItem = {
@@ -268,12 +275,17 @@ export default function Page(){
   const [cfg, setCfg] = useState<any>(DEFAULT);
   const VEH=useMemo(()=>VEHICULOS.map(v=>({ ...v, ...cfg.vehicles?.[v.id], insumos:{...v.insumos,...(cfg.vehicles?.[v.id]?.insumos||{})} })),[cfg]);
 
-  const [modo,setModo]=useState<"interno"|"comercial"|"logisbur">("interno");
+  const [modo,setModo]=useState<"interno"|"comercial"|"logisbur">("logisbur");
+  useEffect(() => {
+    if (modo === "interno" && !FEATURES.showInterno) setModo("logisbur");
+    if (modo === "comercial" && !FEATURES.showComercial) setModo("logisbur");
+  }, [modo]);
   const [openCfg,setOpenCfg]=useState(false);
   const [openPeaje,setOpenPeaje]=useState(false);
 
   const [origen,setOrigen]=useState("—");
   const [destino,setDestino]=useState("—");
+  
 
   // Datos para narrativa / reporte
   const [cliente, setCliente] = useState("");
@@ -312,6 +324,8 @@ export default function Page(){
       setLogoUrl(window.location.origin + "/logo.png");
     }
   }, []);
+
+  
 
 
   /** ====== NUEVO: Contexto FOB/CIF para cálculos de costos adicionales ====== */
@@ -492,10 +506,18 @@ export default function Page(){
 
         {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4 no-print">
-          <div className="text-slate-800 font-semibold text-xl">Cotizador – Interno / Comercial / Logisbur</div>
+          <div className="text-slate-800 font-semibold text-xl">
+            { (FEATURES.showInterno || FEATURES.showComercial)
+              ? "Cotizador – Interno / Comercial / Logisbur"
+              : "Cotizador – Logisbur" }
+          </div>
           <div className="flex items-center gap-2">
-            <Btn active={modo==="interno"} onClick={()=>setModo("interno")}>Interno</Btn>
-            <Btn active={modo==="comercial"} onClick={()=>setModo("comercial")}>Comercial</Btn>
+            {FEATURES.showInterno && (
+              <Btn active={modo==="interno"} onClick={()=>setModo("interno")}>Interno</Btn>
+            )}
+            {FEATURES.showComercial && (
+              <Btn active={modo==="comercial"} onClick={()=>setModo("comercial")}>Comercial</Btn>
+            )}
             <Btn active={modo==="logisbur"} onClick={()=>setModo("logisbur")}>Logisbur</Btn>
             <button className="px-3 py-2 rounded-lg ring-1 ring-slate-200 bg-white" onClick={()=>setOpenCfg(true)} title="Configuración">⚙️</button>
           </div>
