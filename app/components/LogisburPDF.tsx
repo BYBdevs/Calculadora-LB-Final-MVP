@@ -92,24 +92,28 @@ export default function LogisburPDF({
         </View>
 
         {/* Cuerpo */}
-        <Text style={styles.mb3}>Estimado {cliente || "cliente"},</Text>
+        <Text style={styles.mb3}>Estimado/a {cliente || "cliente"},</Text>
         <Text style={styles.mb4}>
           Por medio de la presente, ponemos en su conocimiento los valores correspondientes al servicio logístico solicitado:
         </Text>
 
         {/* Datos en orden vertical: Producto, Unidad de Carga, Origen, Destino */}
-        <View style={styles.mb3}>
+        <View style={[styles.row, styles.mb3]}>
+          <View>
           <Text style={styles.label}>Producto:</Text>
           <Text style={styles.value}>{producto || "—"}</Text>
 
           <Text style={styles.label}>Unidad de Carga:</Text>
           <Text style={styles.value}>{unidadCarga || "—"}</Text>
+          </View>
 
+          <View style={styles.listVal}>
           <Text style={styles.label}>Origen:</Text>
           <Text style={styles.value}>{origen || "—"}</Text>
 
           <Text style={styles.label}>Destino:</Text>
           <Text style={styles.value}>{destino || "—"}</Text>
+          </View>
         </View>
 
         <View style={styles.mb3}>
@@ -165,12 +169,14 @@ export default function LogisburPDF({
         {/* Datos bancarios (sin marcos) */}
         <View style={styles.boxBancario}>
           <Text style={styles.mb2}>Depósito o transferencia bancaria a:</Text>
-          <Text>Beneficiario: Burneo Logística Carga Internacional Logisbur S.A.</Text>
-          <Text>RUC: 0791796571001</Text>
-          <Text>Banco Pichincha C.A.</Text>
-          <Text>Cuenta Corriente: 2100169035</Text>
-          <Text>Código SWIFT: PICHECEQ</Text>
-          <Text style={styles.mb2}>Condición: Full Transfer Value – OUR</Text>
+          <View style={styles.mb2}>
+            <Text>Beneficiario: Burneo Logística Carga Internacional Logisbur S.A.</Text>
+            <Text>RUC: 0791796571001</Text>
+            <Text>Banco Pichincha C.A.</Text>
+            <Text>Cuenta Corriente: 2100169035</Text>
+            <Text>Código SWIFT: PICHECEQ</Text>
+            <Text style={styles.mb2}>Condición: Full Transfer Value – OUR</Text>
+          </View>
         </View>
       </Page>
     </Document>
