@@ -898,7 +898,6 @@ export default function Page(){
                                   <span>
                                   {c.label}
                                   {/* Para import/export va después del label; en tránsito NO lo mostramos aquí */}
-                                  {operacion !== "transito" && isNum && c.unitLabel ? ` (${c.unitLabel})` : ""}
                                 </span>
                                 {isNum ? (
                                   <span className="tabular-nums">

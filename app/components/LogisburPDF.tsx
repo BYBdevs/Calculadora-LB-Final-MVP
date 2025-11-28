@@ -36,7 +36,7 @@ const styles = StyleSheet.create({
   sectionTitle: { fontWeight: 700, marginBottom: 4 },
   listRow: { flexDirection: "row", alignItems: "center", marginBottom: 4 },
   listKey: { flex: 1 },
-  listVal: { textAlign: "left", width: 290 },
+  listVal: { textAlign: "left", width: 250 },
 
   boxBancario: {
     borderWidth: 1,
@@ -131,9 +131,10 @@ export default function LogisburPDF({
               {costosSel.map((c) => {
                 const numeric = isNum(c.unitUSD);
                 const etiqueta = numeric
-                  ? (operacion === "transito" ? c.label : `${c.label}${c.unitLabel ? ` (${c.unitLabel})` : ""}`)
-                  : c.label;
-
+                  ? (operacion === "transito"
+                    ? c.label
+                    : c.label) // Import/export nunca deben mostrar (unidad)
+                : c.label;
                 const valor = numeric
                   ? (operacion === "transito"
                       ? `${money(Number(c.unitUSD))}${c.unitLabel ? ` (${c.unitLabel})` : ""}`
