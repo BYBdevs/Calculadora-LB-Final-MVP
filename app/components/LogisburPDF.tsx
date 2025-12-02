@@ -29,6 +29,7 @@ const styles = StyleSheet.create({
   mb2: { marginBottom: 8 },
   mb3: { marginBottom: 12 },
   mb4: { marginBottom: 16 },
+  mb5: { marginBottom: 4 },
 
   label: { fontSize: 11, fontWeight: 700, marginBottom: 2 },
   value: { marginBottom: 8 },
@@ -92,8 +93,8 @@ export default function LogisburPDF({
         </View>
 
         {/* Cuerpo */}
-        <Text style={styles.mb3}>Señores {cliente || "grupo"},</Text>
-        <Text style={styles.mb3}>Att: { rutaNombre || "cliente"}</Text>
+        <Text style={styles.mb5}>Señores {cliente || "grupo"},</Text>
+        <Text style={styles.mb3}>En atención: { rutaNombre || "cliente"}</Text>
         <Text style={styles.mb4}>
           Por medio de la presente, ponemos en su conocimiento los valores correspondientes al servicio logístico solicitado:
         </Text>
@@ -117,11 +118,9 @@ export default function LogisburPDF({
           </View>
         </View>
 
-        <View style={styles.mb3}>
-          <Text>
-            <Text style={styles.label}>Valor de Transporte: </Text>
-            USD {Number(valorTransporte || 0).toFixed(2)}{" "}por unidad
-          </Text>
+        <View style={[styles.mb3, styles.row]}>
+          <View><Text style={styles.label}>Valor de Transporte: </Text></View>
+          <View style={styles.listVal}><Text> USD {Number(valorTransporte || 0).toFixed(2)}{" "}por unidad </Text></View>
         </View>
 
         {/* Costos adicionales (sin marcos) */}
