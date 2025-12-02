@@ -59,12 +59,12 @@ const isNum = (v: unknown) => Number.isFinite(Number(v));
 const bgUrl = "./LogisburPDF.jpg"; // <-- NUEVO: ruta de tu imagen con header+footer
 
 export default function LogisburPDF({
-  ciudad, cliente, producto, unidadCarga,
+  ciudad, cliente, rutaNombre, producto, unidadCarga,
   origen, destino, valorTransporte,
   costosSel, observaciones, manerapago, operacion,
  // <-- NUEVO: ruta de tu imagen con header+footer
 }: {
-  ciudad: string; cliente: string; producto: string; unidadCarga: string;
+  ciudad: string; cliente: string; rutaNombre:string; producto: string; unidadCarga: string;
   origen: string; destino: string; valorTransporte: number;
   costosSel: Sel[]; observaciones: string; manerapago: string; operacion: OperationType;
 }) {
@@ -92,7 +92,8 @@ export default function LogisburPDF({
         </View>
 
         {/* Cuerpo */}
-        <Text style={styles.mb3}>Estimado/a {cliente || "cliente"},</Text>
+        <Text style={styles.mb3}>Señores {cliente || "grupo"},</Text>
+        <Text style={styles.mb3}>Att: { rutaNombre || "cliente"}</Text>
         <Text style={styles.mb4}>
           Por medio de la presente, ponemos en su conocimiento los valores correspondientes al servicio logístico solicitado:
         </Text>

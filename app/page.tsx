@@ -435,6 +435,7 @@ export default function Page(){
     <LogisburPDF
       ciudad={ciudadReporte}
       cliente={cliente}
+      rutaNombre={rutaNombre}
       producto={producto}
       unidadCarga={unidadCarga}
       origen={origen}
@@ -489,6 +490,7 @@ export default function Page(){
               <Reporte
               ciudad={ciudadReporte}
               cliente={cliente}
+              rutaNombre={rutaNombre}
               producto={producto}
               unidadCarga={unidadCarga}
               origen={origen}
@@ -531,8 +533,8 @@ export default function Page(){
               <Text label="Destino" v={destino} set={setDestino}/>
             </div>
             <div className="grid grid-cols-2 gap-2 mt-2">
-              <Text label="Cliente" v={cliente} set={setCliente}/>
-              <Text label="Nombre de ruta (opcional)" v={rutaNombre} set={setRutaNombre}/>
+              <Text label="Empresa" v={cliente} set={setCliente}/>
+              <Text label="Cliente" v={rutaNombre} set={setRutaNombre}/>
             </div>
             <div className="grid grid-cols-2 gap-2 mt-2">
               <Text label="Producto" v={producto} set={setProducto}/>
@@ -1126,6 +1128,7 @@ const PercentField=({label,value,onChange}:{label:string,value:number,onChange:(
 function Reporte({
   ciudad,
   cliente,
+  rutaNombre,
   producto,
   unidadCarga,
   origen,
@@ -1138,6 +1141,7 @@ function Reporte({
 }: {
   ciudad: string;
   cliente: string;
+  rutaNombre: string;
   producto: string;
   unidadCarga: string;
   origen: string;
